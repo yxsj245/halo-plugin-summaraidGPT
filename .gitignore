@@ -75,3 +75,7 @@ application-local.properties
 /workplace/
 /src/main/resources/console/
 /node_modules/
+
+# 浏览器调试过程文件与截图不作为源码提交
+/.playwright-cli/
+/output/playwright/

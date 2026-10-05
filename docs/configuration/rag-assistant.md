@@ -121,13 +121,25 @@ location ^~ /install/ {
 
 | 配置项 | 字段 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| 配色方案 | `styleConfig.stylePreset` | `default` | 可选默认暖白、黑金、海盐蓝、清透蓝、松石绿、蔷薇、自定义。 |
+| 配色方案 | `styleConfig.stylePreset` | `default` | 可选默认暖白、黑金、海盐蓝、清透蓝、松石绿、蔷薇、星港终端、自定义。 |
 | 主色 | `styleConfig.primaryColor` | `#a16207` | 自定义配色时用于按钮、引用高亮和重点状态。 |
 | 辅色 | `styleConfig.secondaryColor` | `#f4f4f5` | 自定义配色时用于浅色背景和悬浮状态。 |
 | 面板背景 | `styleConfig.surfaceColor` | `#fafafa` | 自定义配色时用于聊天窗口和输入区背景。 |
 | 文字颜色 | `styleConfig.textColor` | `#18181b` | 自定义配色时用于标题、正文和按钮文字。 |
 | 圆角风格 | `styleConfig.borderRadius` | `soft` | 可选标准、柔和、圆润。 |
 | 颜色模式 | `styleConfig.colorMode` | `light` | 可选跟随系统、浅色、深色。 |
+
+### 星港终端（`stellar`）
+
+面向 theme-xiaozhu2.0 的可选前台风格，两个配置开关相互独立：助手只由 `styleConfig.stylePreset = stellar` 启用，摘要的「星港导读」不联动助手。
+
+- 原精灵图宠物替换为原创内联 SVG 导航无人机，不下载 PetDex 精灵图，不启用逐帧计时。后台已导入的宠物保留，改回其他配色后恢复原行为。
+- 默认用户侧名称「智阅助手」显示为「星枢领航员」，默认头像换成星核轨道徽记；站长自定义名称/头像/欢迎语仍保留。
+- 小窗、全屏、气泡、划词入口随站点 `html[data-scheme]` 即时切换昼夜；站点未提供该标记时才按 `colorMode` 降级。
+- 继续支持尺寸、拖动、位置记忆和纯宠物模式；减弱动态效果下角色静态显示。
+- HTTP 或 Clipboard API 权限拒绝时尝试旧式复制，失败则提示手动复制。
+
+完整开关、覆盖规则及部署说明见 [星港适配说明](../stellar-theme.md)。
 
 ## 默认悬浮位置
 

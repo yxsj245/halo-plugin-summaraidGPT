@@ -218,6 +218,235 @@ export const articleSummaryStyles = css`
     background: linear-gradient(90deg, var(--likcc-summaraid-fixed-line) 0%, rgba(255, 255, 255, 0) 100%);
   }
 
+  /* ── 星港信号简报（stellar） ──
+     结构与经典/简约/内联卡片完全独立：斜切角外壳 + 四角括线 + 一条扫描光 + HUD 状态行。
+     所有颜色只从站点变量取值（--cyan/--violet/--panel/--panel-soft/--panel-border/--reader-text/--text/--text-dim），
+     站点未提供这些变量时用 currentColor 与 color-mix 兜底，昼夜都不会糊出一块黑板；
+     字体同样只复用 --sans/--hud/--mono，不引入第三款字体。 */
+  .likcc-summaraidGPT-stellar {
+    --likcc-stellar-surface: var(--panel, color-mix(in srgb, currentColor 8%, transparent));
+    --likcc-stellar-surface-soft: var(--panel-soft, color-mix(in srgb, currentColor 5%, transparent));
+    --likcc-stellar-line: var(--panel-border, color-mix(in srgb, currentColor 18%, transparent));
+    --likcc-stellar-strong: var(--text, currentColor);
+    --likcc-stellar-body: var(--text, currentColor);
+    --likcc-stellar-muted: var(--text-dim, currentColor);
+    --likcc-stellar-accent: var(--cyan, currentColor);
+    --likcc-stellar-accent-alt: var(--violet, currentColor);
+    --likcc-stellar-cut: 15px;
+    --likcc-stellar-bracket: 0.55;
+    position: relative;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0.35rem 0;
+    font-family: var(--sans, inherit);
+    color: var(--likcc-stellar-body);
+  }
+
+  /* 浅底上括线与扫描光要更实一点才看得见，深色则保持克制 */
+  .likcc-summaraidGPT-stellar--dark {
+    --likcc-stellar-bracket: 0.48;
+  }
+
+  .likcc-summaraidGPT-stellar-shell {
+    position: relative;
+    overflow: hidden;
+    box-sizing: border-box;
+    padding: 0.78rem 0.95rem 0.92rem;
+    border: 1px solid color-mix(in srgb, var(--likcc-stellar-accent) 22%, var(--likcc-stellar-line));
+    background: linear-gradient(
+      165deg,
+      color-mix(in srgb, var(--likcc-stellar-accent) 10%, var(--likcc-stellar-surface)),
+      var(--likcc-stellar-surface)
+    );
+    -webkit-backdrop-filter: blur(16px) saturate(1.2);
+    backdrop-filter: blur(16px) saturate(1.2);
+    clip-path: polygon(
+      0 0,
+      calc(100% - var(--likcc-stellar-cut)) 0,
+      100% var(--likcc-stellar-cut),
+      100% 100%,
+      var(--likcc-stellar-cut) 100%,
+      0 calc(100% - var(--likcc-stellar-cut))
+    );
+    animation: likcc-summaraidGPT-stellar-in 0.62s cubic-bezier(0.22, 1, 0.36, 1) both;
+    transition: border-color 0.3s ease;
+  }
+
+  .likcc-summaraidGPT-stellar-shell:hover {
+    border-color: color-mix(in srgb, var(--likcc-stellar-accent) 46%, var(--likcc-stellar-line));
+  }
+
+  /* 四角括线 */
+  .likcc-summaraidGPT-stellar-shell::before {
+    content: '';
+    position: absolute;
+    inset: 5px;
+    pointer-events: none;
+    background:
+      linear-gradient(var(--likcc-stellar-accent), var(--likcc-stellar-accent)) left top / 12px 1.5px,
+      linear-gradient(var(--likcc-stellar-accent), var(--likcc-stellar-accent)) left top / 1.5px 12px,
+      linear-gradient(var(--likcc-stellar-accent), var(--likcc-stellar-accent)) right bottom / 12px 1.5px,
+      linear-gradient(var(--likcc-stellar-accent), var(--likcc-stellar-accent)) right bottom / 1.5px 12px;
+    background-repeat: no-repeat;
+    opacity: var(--likcc-stellar-bracket);
+    transition: opacity 0.3s ease;
+  }
+
+  .likcc-summaraidGPT-stellar-shell:hover::before {
+    opacity: 1;
+  }
+
+  /* 顶部扫描光：一次性入场之后的唯一持续动效，减弱动态效果时被媒体查询整体关掉 */
+  .likcc-summaraidGPT-stellar-shell::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -42%;
+    width: 42%;
+    height: 1px;
+    pointer-events: none;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--likcc-stellar-accent) 88%, transparent),
+      transparent
+    );
+    animation: likcc-summaraidGPT-stellar-scan 4.2s linear infinite;
+  }
+
+  .likcc-summaraidGPT-stellar-rail {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    margin-bottom: 0.62rem;
+  }
+
+  .likcc-summaraidGPT-stellar-code {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.14rem 0.42rem;
+    border: 1px solid color-mix(in srgb, var(--likcc-stellar-accent) 40%, transparent);
+    border-radius: 3px;
+    background: var(--likcc-stellar-surface-soft);
+    color: var(--likcc-stellar-accent);
+    font-family: var(--hud, inherit);
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    line-height: 1.2;
+    clip-path: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 0 100%);
+  }
+
+  .likcc-summaraidGPT-stellar-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.32rem;
+    color: var(--likcc-stellar-muted);
+    font-family: var(--hud, inherit);
+    font-size: 0.58rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .likcc-summaraidGPT-stellar-status::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    background: currentColor;
+    transform: rotate(45deg);
+  }
+
+  .likcc-summaraidGPT-stellar-status--decoding {
+    color: var(--likcc-stellar-accent);
+  }
+
+  .likcc-summaraidGPT-stellar-status--interrupted {
+    color: var(--likcc-stellar-accent-alt);
+  }
+
+  .likcc-summaraidGPT-stellar-head {
+    display: flex;
+    align-items: center;
+    gap: 0.46rem;
+    margin-bottom: 0.58rem;
+  }
+
+  .likcc-summaraidGPT-stellar-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 0.92rem;
+    height: 0.92rem;
+    color: var(--likcc-stellar-accent-alt);
+  }
+
+  .likcc-summaraidGPT-stellar-mark svg {
+    width: 100%;
+    height: 100%;
+    fill: currentColor;
+  }
+
+  .likcc-summaraidGPT-stellar-title {
+    min-width: 0;
+    color: var(--likcc-stellar-strong);
+    font-family: var(--sans, inherit);
+    font-size: 0.98rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    line-height: 1.35;
+    text-wrap: pretty;
+  }
+
+  .likcc-summaraidGPT-stellar-model {
+    flex: none;
+    margin-left: auto;
+    padding: 0.1rem 0.38rem;
+    border: 1px solid color-mix(in srgb, var(--likcc-stellar-accent) 28%, transparent);
+    border-radius: 999px;
+    color: var(--likcc-stellar-accent);
+    font-family: var(--mono, inherit);
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    line-height: 1.3;
+    white-space: nowrap;
+  }
+
+  /* 正文只靠一条上引线分区，不再套第二层卡片 */
+  .likcc-summaraidGPT-stellar-body {
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--likcc-stellar-line);
+  }
+
+  .likcc-summaraidGPT-stellar-text {
+    margin: 0;
+    color: var(--likcc-stellar-body);
+    font-family: var(--sans, inherit);
+    font-size: 0.95rem;
+    line-height: 1.85;
+    letter-spacing: 0.01em;
+    word-break: break-word;
+    text-wrap: pretty;
+  }
+
+  .likcc-summaraidGPT-stellar-text--state {
+    color: var(--likcc-stellar-muted);
+  }
+
+  .likcc-summaraidGPT-stellar-cursor {
+    display: inline-block;
+    width: 2px;
+    height: 1.1em;
+    margin-left: 2px;
+    vertical-align: middle;
+    background-color: var(--likcc-stellar-accent);
+    animation: likcc-summaraidGPT-blink 1.1s steps(1, end) infinite;
+  }
+
   .likcc-summaraidGPT-summary-container {
     width: 100%;
     box-sizing: border-box;
@@ -357,13 +586,40 @@ export const articleSummaryStyles = css`
       font-size: 0.92rem;
       line-height: 1.66;
     }
+
+    /* 窄屏：收紧斜切角与内距，HUD 行不换行、状态词不挤到标题上 */
+    .likcc-summaraidGPT-stellar {
+      --likcc-stellar-cut: 12px;
+    }
+
+    .likcc-summaraidGPT-stellar-shell {
+      padding: 0.68rem 0.78rem 0.8rem;
+    }
+
+    .likcc-summaraidGPT-stellar-title {
+      font-size: 0.94rem;
+    }
+
+    .likcc-summaraidGPT-stellar-text {
+      font-size: 0.92rem;
+      line-height: 1.78;
+    }
+
+    .likcc-summaraidGPT-stellar-model {
+      padding: 0.08rem 0.3rem;
+      font-size: 0.56rem;
+      letter-spacing: 0.03em;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .likcc-summaraidGPT-summary-container,
     .likcc-summaraidGPT-summary-content,
     .likcc-summaraidGPT-gpt-name::before,
-    .likcc-summaraidGPT-cursor {
+    .likcc-summaraidGPT-cursor,
+    .likcc-summaraidGPT-stellar-shell,
+    .likcc-summaraidGPT-stellar-shell::after,
+    .likcc-summaraidGPT-stellar-cursor {
       animation: none !important;
       transition: none !important;
       transform: none !important;
@@ -406,6 +662,26 @@ export const articleSummaryStyles = css`
     }
     100% {
       left: 100%;
+    }
+  }
+
+  @keyframes likcc-summaraidGPT-stellar-in {
+    0% {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes likcc-summaraidGPT-stellar-scan {
+    0% {
+      left: -42%;
+    }
+    100% {
+      left: 108%;
     }
   }
 

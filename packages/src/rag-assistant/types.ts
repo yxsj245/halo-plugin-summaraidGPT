@@ -33,7 +33,8 @@ export interface RagAssistantPetConfig {
 }
 
 export interface RagAssistantStyleConfig {
-  stylePreset: 'default' | 'graphite' | 'ocean' | 'azure' | 'forest' | 'rose' | 'custom';
+  /** stellar 为站点（星港主题）风格：配色由站点 CSS 变量接管，不再走固定色板。 */
+  stylePreset: 'default' | 'graphite' | 'ocean' | 'azure' | 'forest' | 'rose' | 'stellar' | 'custom';
   primaryColor: string;
   secondaryColor: string;
   surfaceColor: string;

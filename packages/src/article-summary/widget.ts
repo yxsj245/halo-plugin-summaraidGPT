@@ -8,13 +8,29 @@ import {
   matchesDarkSelector,
   parseTheme,
   resolveLogoUrl,
+  resolveStellarSignalState,
+  resolveStellarSummaryClass,
+  resolveStellarTitle,
+  resolveSummarySignal,
+  resolveSummaryUiStyle,
+  shouldTypewrite,
+  stellarStateMessage,
+  stellarStatusLabel,
   type SummaryTheme,
+  type SummaryUiStyle,
 } from './shared';
 
 type ThemeVariant = 'default' | 'dark' | 'blue' | 'green' | 'custom';
-type UiStyleVariant = 'classic' | 'inline' | 'simple';
 type FixedToneVariant = 'violet' | 'graphite' | 'copper';
 type FixedDensityVariant = 'compact' | 'comfortable';
+
+const DEFAULT_SUMMARY_CONTENT_HINT = '暂无摘要内容';
+const SUMMARY_FAILURE_HINT = '摘要加载失败，请稍后重试';
+
+/** 系统级“减弱动态效果”：星港模式据此跳过逐字计时。 */
+function prefersReducedMotion(): boolean {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+}
 
 @customElement('likcc-article-summary')
 export class ArticleSummaryWidget extends LitElement {
@@ -72,12 +88,19 @@ export class ArticleSummaryWidget extends LitElement {
   private loadFailed = false;
 
   @state()
+  private contentEmpty = false;
+
+  @state()
   private isDark = false;
 
   private themeObservers: MutationObserver[] = [];
   private typewriterTimer?: number;
   private initialized = false;
   private prefersColorSchemeQuery?: MediaQueryList;
+  /** 请求代次：切换 postName 或断开连接后，迟到响应不得再改写正文与打字机。 */
+  private loadSequence = 0;
+  /** 已发起加载的文章名：挂载时 postName 已赋值，首次 updated 会再看到一次同名变更，据此避免重复请求。 */
+  private loadedPostName = '';
   private readonly handleSystemColorSchemeChange = () => {
     this.refreshThemeMode();
   };
@@ -87,22 +110,22 @@ export class ArticleSummaryWidget extends LitElement {
     this.refreshThemeMode();
     this.bindThemeObservers();
     this.bindSystemColorSchemeListener();
+
+    // 元素被导航重新插入时（原位复用），补一次加载；空文章名的收尾也交给 loadSummary 统一处理
+    if (this.initialized) {
+      void this.loadSummary();
+    }
   }
 
   protected firstUpdated(): void {
-    if (this.postName) {
-      void this.loadSummary();
-    } else {
-      this.loading = false;
-      this.loadFailed = true;
-      this.displayContent = '摘要加载失败，请稍后重试';
-    }
-
+    void this.loadSummary();
     this.initialized = true;
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
+    // 断开即作废在途请求，迟到响应不会在已离场的元素上重启打字机
+    this.loadSequence += 1;
     this.unbindThemeObservers();
     this.unbindSystemColorSchemeListener();
     this.stopTypewriter();
@@ -118,35 +141,83 @@ export class ArticleSummaryWidget extends LitElement {
       return;
     }
 
-    if (changedProperties.has('postName') && this.postName) {
+    // 只对“文章名真的变了”重新取数：首次挂载由 firstUpdated 负责，updated 不再补一枪重复请求。
+    // 清空文章名也算变化，必须照样走 loadSummary，否则空值分支作废在途请求的动作永远不会执行。
+    if (changedProperties.has('postName') && this.postName !== this.loadedPostName) {
       void this.loadSummary();
     }
   }
 
   private async loadSummary(): Promise<void> {
+    if (!this.postName) {
+      // 没有文章名就没有可取的摘要：作废在途请求并停掉打字机，避免迟到响应把旧正文写回新页面
+      this.loadSequence += 1;
+      this.loadedPostName = '';
+      this.stopTypewriter();
+      this.markLoadFailed();
+      return;
+    }
+
+    const sequence = this.loadSequence + 1;
+    this.loadSequence = sequence;
+    this.loadedPostName = this.postName;
+
     this.stopTypewriter();
     this.loading = true;
     this.loadFailed = false;
     this.displayContent = '';
+    this.contentEmpty = false;
 
     try {
       const data = await fetchSummaryContent(this.postName);
-      this.content = data.summaryContent?.trim() || '暂无摘要内容';
+      if (!this.isCurrentLoad(sequence)) {
+        return;
+      }
+
+      const signal = resolveSummarySignal(data);
+      this.contentEmpty = signal.empty;
+      this.content = signal.content || DEFAULT_SUMMARY_CONTENT_HINT;
       this.applyContent();
     } catch (error) {
+      if (!this.isCurrentLoad(sequence)) {
+        return;
+      }
+
       console.warn('获取摘要失败:', error);
-      this.content = '摘要加载失败，请稍后重试';
-      this.displayContent = this.content;
-      this.loadFailed = true;
+      this.markLoadFailed();
     } finally {
-      this.loading = false;
+      if (this.isCurrentLoad(sequence)) {
+        this.loading = false;
+      }
     }
+  }
+
+  /** 代次与连接状态双检查：旧请求或已离场元素的响应一律丢弃。 */
+  private isCurrentLoad(sequence: number): boolean {
+    return sequence === this.loadSequence && this.isConnected;
+  }
+
+  private markLoadFailed(): void {
+    this.loading = false;
+    this.loadFailed = true;
+    this.contentEmpty = false;
+    this.content = SUMMARY_FAILURE_HINT;
+    this.displayContent = SUMMARY_FAILURE_HINT;
   }
 
   private applyContent(): void {
     this.stopTypewriter();
 
-    if (!this.typewriter) {
+    // 星港在没有信号时根本不渲染正文，逐字计时没有落点，这里直接整段落定；
+    // 其余风格保持原口径不变（提示语仍按打字机逐字出现）。
+    const skipTypewriter = (this.effectiveUiStyle === 'stellar' && this.contentEmpty)
+      || !shouldTypewrite({
+        typewriter: this.typewriter,
+        uiStyle: this.effectiveUiStyle,
+        prefersReducedMotion: prefersReducedMotion(),
+      });
+
+    if (skipTypewriter) {
       this.displayContent = this.content;
       this.typing = false;
       return;
@@ -248,20 +319,8 @@ export class ArticleSummaryWidget extends LitElement {
     return 'default';
   }
 
-  private get effectiveUiStyle(): UiStyleVariant {
-    if (this.uiStyle === 'simple') {
-      return 'simple';
-    }
-    if (this.uiStyle === 'quiet') {
-      return 'simple';
-    }
-    if (this.uiStyle === 'note' || this.uiStyle === 'minimal' || this.uiStyle === 'stripe' || this.uiStyle === 'inline') {
-      return this.uiStyle === 'inline' ? 'inline' : 'simple';
-    }
-    if (this.themeName === 'spotlight') {
-      return 'simple';
-    }
-    return 'classic';
+  private get effectiveUiStyle(): SummaryUiStyle {
+    return resolveSummaryUiStyle(this.uiStyle, this.themeName);
   }
 
   private get customThemeStyles(): Record<string, string> {
@@ -316,6 +375,9 @@ export class ArticleSummaryWidget extends LitElement {
   }
 
   protected render() {
+    if (this.effectiveUiStyle === 'stellar') {
+      return this.renderStellarCard();
+    }
     if (this.effectiveUiStyle === 'simple') {
       return this.renderSimpleCard();
     }
@@ -324,6 +386,48 @@ export class ArticleSummaryWidget extends LitElement {
     }
 
     return this.renderClassicCard();
+  }
+
+  /**
+   * 星港信号简报：独立渲染，不复用经典/简约卡片的任何结构。
+   * 全部取色都回到主题变量（--cyan/--violet 作强调，--panel/--panel-soft/--panel-border 作玻璃与描边，
+   * --text/--text-dim 作文字层级），因此昼夜随 [data-scheme] 自动切换，组件本身不写死颜色。
+   */
+  private renderStellarCard() {
+    const state = resolveStellarSignalState({
+      loading: this.loading,
+      failed: this.loadFailed,
+      empty: this.contentEmpty,
+    });
+    const status = stellarStatusLabel(state);
+    const message = stellarStateMessage(state);
+
+    return html`
+      <div class=${resolveStellarSummaryClass(this.isDark)}>
+        <div class="likcc-summaraidGPT-stellar-shell">
+          <div class="likcc-summaraidGPT-stellar-rail">
+            <span class="likcc-summaraidGPT-stellar-code">SIGNAL BRIEF</span>
+            ${status
+              ? html`<span class=${`likcc-summaraidGPT-stellar-status likcc-summaraidGPT-stellar-status--${state}`}>${status}</span>`
+              : nothing}
+          </div>
+          <div class="likcc-summaraidGPT-stellar-head">
+            ${this.renderSparklesIcon('likcc-summaraidGPT-stellar-mark')}
+            <span class="likcc-summaraidGPT-stellar-title">${resolveStellarTitle(this.summaryTitle)}</span>
+            ${this.gptName
+              ? html`<span class="likcc-summaraidGPT-stellar-model">${this.gptName}</span>`
+              : nothing}
+          </div>
+          <div class="likcc-summaraidGPT-stellar-body">
+            ${state === 'ready'
+              ? html`<p class="likcc-summaraidGPT-stellar-text">${this.displayContent}${this.typing
+                  ? html`<span class="likcc-summaraidGPT-stellar-cursor"></span>`
+                  : nothing}</p>`
+              : html`<p class="likcc-summaraidGPT-stellar-text likcc-summaraidGPT-stellar-text--state">${message}</p>`}
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   private renderClassicCard() {

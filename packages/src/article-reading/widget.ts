@@ -8,7 +8,14 @@ import {
   recordReadingInteraction,
 } from './api';
 import type { ArticleReadingSpec, InsightGraph, InsightNode } from './types';
-import { buildThemeObserver, matchesDarkSelector } from '../article-summary/shared';
+import {
+  READING_EMPTY_POST_NAME_MESSAGE,
+  READING_SIGNAL_PENDING_MESSAGE,
+  buildThemeObserver,
+  hasReadingPollBudget,
+  matchesDarkSelector,
+  resolveReadingShellClass,
+} from '../article-summary/shared';
 import { renderIconifyIcon } from '../rag-assistant/iconify';
 
 interface GraphNodeView {
@@ -53,6 +60,10 @@ export class ArticleReadingWidget extends LitElement {
 
   @property({ type: String, attribute: 'dark-selector' })
   darkSelector = '';
+
+  /** 与摘要框同源的界面口径：stellar 时图谱切换到星港配色的 is-stellar 覆盖层。 */
+  @property({ type: String, attribute: 'ui-style' })
+  uiStyle = 'simple';
 
   @property({ type: Boolean, attribute: 'default-collapsed' })
   defaultCollapsed = false;
@@ -104,6 +115,10 @@ export class ArticleReadingWidget extends LitElement {
   private initialized = false;
   private pollTimer?: number;
   private pollAttempts = 0;
+  /** 请求代次：切换 postName 或断开连接后，迟到响应不得再改写图谱或续上轮询。 */
+  private requestSequence = 0;
+  /** 已发起加载的文章名：挂载时 postName 已赋值，首次 updated 会再看到一次同名变更，据此避免重复请求。 */
+  private loadedPostName = '';
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -112,6 +127,11 @@ export class ArticleReadingWidget extends LitElement {
     this.refreshCompactViewport();
     this.bindThemeObservers();
     this.bindEnvironmentObservers();
+
+    // 元素被原位重新插入时补一次加载；首次连接由 firstUpdated 负责，不会重复请求
+    if (this.initialized) {
+      void this.loadReading();
+    }
   }
 
   protected firstUpdated(): void {
@@ -122,6 +142,8 @@ export class ArticleReadingWidget extends LitElement {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
+    // 断开即作废在途请求，迟到响应不会在已离场的元素上重启轮询
+    this.requestSequence += 1;
     this.clearPollTimer();
     this.unbindEnvironmentObservers();
     this.unbindThemeObservers();
@@ -142,7 +164,10 @@ export class ArticleReadingWidget extends LitElement {
       return;
     }
 
-    if (changedProperties.has('postName')) {
+    // 只对“文章名真的变了”重新取数：首次挂载由 firstUpdated 负责，updated 不再补一枪重复请求。
+    // 清空文章名也算变化，必须照样走 loadReading，否则空值分支的清理（作废在途请求、清轮询、丢掉旧图）永远不会执行。
+    if (changedProperties.has('postName') && this.postName !== this.loadedPostName) {
+      this.pollAttempts = 0;
       void this.loadReading();
     }
 
@@ -151,10 +176,24 @@ export class ArticleReadingWidget extends LitElement {
 
   private async loadReading(silent = false): Promise<void> {
     if (!this.postName) {
+      // 没有文章名就没有可取的图谱：作废在途请求、清掉轮询与残留图谱，
+      // 否则元素会停在上一篇文章的图或“正在后台生成”上不断自动刷新。
+      this.requestSequence += 1;
+      this.clearPollTimer();
+      this.pollAttempts = 0;
+      this.reading = undefined;
+      this.notGenerated = false;
       this.loading = false;
-      this.errorMessage = '文章名称为空';
+      this.popoverOpen = false;
+      this.questionOpen = false;
+      this.errorMessage = READING_EMPTY_POST_NAME_MESSAGE;
+      this.loadedPostName = this.postName;
       return;
     }
+
+    const sequence = this.requestSequence + 1;
+    this.requestSequence = sequence;
+    this.loadedPostName = this.postName;
 
     if (!silent) {
       this.loading = true;
@@ -165,6 +204,9 @@ export class ArticleReadingWidget extends LitElement {
 
     try {
       const data = await fetchExistingArticleReading(this.postName);
+      if (!this.isCurrentRequest(sequence)) {
+        return;
+      }
       if (!this.isRenderableReading(data.spec)) {
         this.reading = undefined;
         this.notGenerated = true;
@@ -177,27 +219,46 @@ export class ArticleReadingWidget extends LitElement {
       this.notGenerated = false;
       this.activeNodeId = this.graph.root.id;
     } catch (error) {
+      if (!this.isCurrentRequest(sequence)) {
+        return;
+      }
       console.warn('洞察图谱加载失败:', error);
       const message = error instanceof Error ? error.message : '洞察图谱加载失败';
       if (this.isPendingGenerationError(message)) {
         this.notGenerated = true;
         this.scheduleExistingPoll();
       } else {
+        this.notGenerated = false;
         this.errorMessage = message;
       }
     } finally {
-      this.loading = false;
+      if (this.isCurrentRequest(sequence)) {
+        this.loading = false;
+      }
     }
+  }
+
+  /** 代次与连接状态双检查：旧请求或已离场元素的响应一律丢弃。 */
+  private isCurrentRequest(sequence: number): boolean {
+    return sequence === this.requestSequence && this.isConnected;
   }
 
   private scheduleExistingPoll(): void {
     this.clearPollTimer();
-    if (this.pollAttempts >= READING_POLL_MAX_ATTEMPTS) {
+    if (!hasReadingPollBudget(this.pollAttempts, READING_POLL_MAX_ATTEMPTS)) {
+      // 轮询预算用尽：不再承诺“完成后会自动刷新”，给出明确的收束文案请读者手动刷新
+      this.notGenerated = false;
+      this.errorMessage = READING_SIGNAL_PENDING_MESSAGE;
       return;
     }
     this.pollAttempts += 1;
+    const postName = this.postName;
     this.pollTimer = window.setTimeout(() => {
       this.pollTimer = undefined;
+      // 轮询只服务当前文章：文章名变了或元素已离场就交给新的请求
+      if (!this.isConnected || this.postName !== postName) {
+        return;
+      }
       void this.loadReading(true);
     }, READING_POLL_INTERVAL_MS);
   }
@@ -302,8 +363,13 @@ export class ArticleReadingWidget extends LitElement {
     return this.nodeById(this.activeNodeId) || this.graph.root;
   }
 
+  /** 星港口径：仅当站点选择 stellar 时才加 is-stellar，旧配置的图谱观感与类名保持不变。 */
+  private get isStellar(): boolean {
+    return this.uiStyle === 'stellar';
+  }
+
   protected render() {
-    const shellClass = this.isDark ? 'reading-shell is-dark' : 'reading-shell';
+    const shellClass = resolveReadingShellClass({ isDark: this.isDark, isStellar: this.isStellar });
 
     if (this.collapsed) {
       return html`
@@ -351,6 +417,9 @@ export class ArticleReadingWidget extends LitElement {
     }
     if (this.notGenerated) {
       return '后台生成中';
+    }
+    if (this.errorMessage === READING_SIGNAL_PENDING_MESSAGE) {
+      return '信号未就位';
     }
     if (this.errorMessage) {
       return '加载失败';

@@ -14,9 +14,11 @@ import { markdownToHtml } from '../format';
 import { renderSourceList } from '../source-list';
 import { renderTyping } from './common';
 import type { RagAssistantMessage } from '../types';
+import { renderStellarEmblem } from './stellar-identity';
 
 export interface PetPanelRenderOptions {
   assistantName: string;
+  stellar?: boolean;
   assistantAvatar?: string;
   avatarFallbackText: string;
   streaming: boolean;
@@ -50,7 +52,7 @@ export function renderPetPanel(options: PetPanelRenderOptions): TemplateResult {
     <section
       class=${options.resizing ? 'pet-panel resizing' : 'pet-panel'}
       style=${options.panelStyle}
-      aria-label="宠物问答"
+      aria-label=${options.stellar ? `${options.assistantName} · 星港通讯` : '宠物问答'}
     >
       <button
         class="pet-panel-resize"
@@ -147,7 +149,7 @@ function renderPanelAvatar(options: PetPanelRenderOptions): TemplateResult {
   const avatarUrl = options.assistantAvatar?.trim();
   return html`
     <span class=${avatarUrl ? 'pet-panel-avatar has-image' : 'pet-panel-avatar'} aria-hidden="true">
-      <span class="pet-panel-avatar-fallback">${options.avatarFallbackText}</span>
+      <span class="pet-panel-avatar-fallback">${options.stellar ? renderStellarEmblem() : options.avatarFallbackText}</span>
       ${avatarUrl
         ? html`
             <img
@@ -180,7 +182,7 @@ function renderPanelWelcome(options: PetPanelRenderOptions): TemplateResult {
             <div class="pet-panel-quick">
               ${options.quickQuestions.map((prompt) => html`
                 <button type="button" @click=${() => options.onUsePrompt(prompt)}>
-                  ${questionAnswerIcon()}<span>${prompt}</span>
+                  ${options.stellar ? renderStellarEmblem() : questionAnswerIcon()}<span>${prompt}</span>
                 </button>
               `)}
             </div>
@@ -208,7 +210,8 @@ function renderPanelMessage(
   return html`
     <article class=${`pet-panel-message ${message.role}`}>
       <div class="pet-panel-message-meta">
-        <span>${message.role === 'user' ? '我' : '助手'}</span>
+        ${message.role === 'assistant' && options.stellar ? html`<span class="stellar-message-emblem">${renderStellarEmblem()}</span>` : nothing}
+        <span>${message.role === 'user' ? '我' : options.stellar ? options.assistantName : '助手'}</span>
         <time>${message.time}</time>
         <span class="pet-message-actions">
           <button type="button" title="复制" @click=${() => options.onCopyMessage(message)}>
@@ -233,7 +236,7 @@ function renderPanelMessage(
       ${sources.length
         ? html`
             <details class="pet-panel-sources">
-              <summary>${questionAnswerIcon()} ${sources.length} 个关联资源</summary>
+              <summary>${options.stellar ? renderStellarEmblem() : questionAnswerIcon()} ${sources.length} 个${options.stellar ? '信号来源' : '关联资源'}</summary>
               ${renderSourceList(sources)}
             </details>
           `

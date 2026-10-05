@@ -706,6 +706,195 @@ export const articleReadingStyles = css`
     overflow-wrap: anywhere;
   }
 
+  /* ── 星港口径（stellar） ──
+     结构与几何一律不动，只重写配色与字体：图谱里原本写死的深蓝根节点、纯白浮窗、
+     rgba 阴影全部换成主题变量，昼夜由主题的 [data-scheme] 一次切换。
+     取色口径：--panel / --panel-soft / --panel-border 作玻璃与描边，--cyan / --violet 作强调，
+     --text / --reader-text / --text-dim 作文字层级；四类语义节点仍在同一色域内互相区分——
+     结论=紫、核心=青、背景=青与文字灰、论据=青紫之间，不会退化成同一种颜色。 */
+  .reading-shell.is-stellar {
+    --likcc-stellar-surface: var(--panel, color-mix(in srgb, currentColor 8%, transparent));
+    --likcc-stellar-surface-soft: var(--panel-soft, color-mix(in srgb, currentColor 5%, transparent));
+    --likcc-stellar-line: var(--panel-border, color-mix(in srgb, currentColor 18%, transparent));
+    --likcc-stellar-strong: var(--text, currentColor);
+    --likcc-stellar-body: var(--reader-text, var(--text, currentColor));
+    --likcc-stellar-muted: var(--text-dim, currentColor);
+    --likcc-stellar-accent: var(--cyan, currentColor);
+    --likcc-stellar-accent-alt: var(--violet, currentColor);
+    --likcc-reading-surface: var(--likcc-stellar-surface);
+    --likcc-reading-panel: var(--likcc-stellar-surface);
+    --likcc-reading-soft: var(--likcc-stellar-surface-soft);
+    --likcc-reading-line: var(--likcc-stellar-line);
+    --likcc-reading-node: var(--likcc-stellar-surface);
+    --likcc-reading-node-soft: var(--likcc-stellar-surface-soft);
+    --likcc-reading-node-strong: var(--likcc-stellar-surface);
+    --likcc-reading-node-border: var(--likcc-stellar-line);
+    --likcc-reading-link: color-mix(in srgb, var(--likcc-stellar-accent) 34%, var(--likcc-stellar-line));
+    --likcc-reading-text: var(--likcc-stellar-body);
+    --likcc-reading-muted: var(--likcc-stellar-muted);
+    --likcc-reading-accent: var(--likcc-stellar-accent);
+    --likcc-reading-conclusion: var(--likcc-stellar-accent-alt);
+    --likcc-reading-background: color-mix(in srgb, var(--likcc-stellar-accent) 46%, var(--likcc-stellar-muted));
+    --likcc-reading-core: var(--likcc-stellar-accent);
+    --likcc-reading-argument: color-mix(in srgb, var(--likcc-stellar-accent) 52%, var(--likcc-stellar-accent-alt));
+    --likcc-reading-tl: var(--likcc-stellar-accent-alt);
+    --likcc-reading-dl: var(--likcc-stellar-accent);
+    font-family: var(--sans, inherit);
+    color: var(--likcc-stellar-body);
+  }
+
+  /* HUD 小字与符号走 --hud / --mono：中文仍回落到 --sans 的中文字形，英文与数字由 Orbitron、JetBrains Mono 接管 */
+  .reading-shell.is-stellar .collapse-mark,
+  .reading-shell.is-stellar .graph-node {
+    font-family: var(--mono, inherit);
+  }
+
+  .reading-shell.is-stellar .reading-collapse,
+  .reading-shell.is-stellar .collapsed-title,
+  .reading-shell.is-stellar .popover-actions button,
+  .reading-shell.is-stellar .primary-action {
+    font-family: var(--hud, inherit);
+  }
+
+  .reading-shell.is-stellar .state-box,
+  .reading-shell.is-stellar .collapsed-summary,
+  .reading-shell.is-stellar .node-title,
+  .reading-shell.is-stellar .node-popover h3,
+  .reading-shell.is-stellar .node-popover p,
+  .reading-shell.is-stellar .payload-list li,
+  .reading-shell.is-stellar .answer-box,
+  .reading-shell.is-stellar .question-input {
+    font-family: var(--sans, inherit);
+  }
+
+  /* 展开/收起与浮窗改用玻璃底，描边取主题发丝线 */
+  .reading-shell.is-stellar .node-popover {
+    border-color: var(--likcc-stellar-line);
+    background: var(--likcc-stellar-surface);
+    -webkit-backdrop-filter: blur(18px) saturate(1.3);
+    backdrop-filter: blur(18px) saturate(1.3);
+    box-shadow: var(--panel-shadow, 0 18px 46px color-mix(in srgb, var(--likcc-stellar-muted) 26%, transparent));
+  }
+
+  .reading-shell.is-stellar .question-input {
+    border-color: var(--likcc-stellar-line);
+    background: var(--likcc-stellar-surface-soft);
+    color: var(--likcc-stellar-body);
+  }
+
+  .reading-shell.is-stellar .source-anchor,
+  .reading-shell.is-stellar .answer-box {
+    border-color: color-mix(in srgb, var(--likcc-stellar-accent) 26%, var(--likcc-stellar-line));
+    background: color-mix(in srgb, var(--likcc-stellar-accent) 8%, transparent);
+    color: var(--likcc-stellar-body);
+  }
+
+  /* 主操作不做实心填充：强调色在深色下是亮青、浅色下是深青，纯色底会撞掉一边的对比度 */
+  .reading-shell.is-stellar .primary-action {
+    border-color: color-mix(in srgb, var(--likcc-stellar-accent) 48%, transparent);
+    background: color-mix(in srgb, var(--likcc-stellar-accent) 14%, transparent);
+    color: var(--likcc-stellar-accent);
+  }
+
+  .reading-shell.is-stellar .primary-action:hover:not([disabled]) {
+    border-color: color-mix(in srgb, var(--likcc-stellar-accent) 70%, transparent);
+    background: color-mix(in srgb, var(--likcc-stellar-accent) 22%, transparent);
+  }
+
+  .reading-shell.is-stellar .graph-node {
+    background: color-mix(in srgb, var(--node-color) 8%, var(--likcc-stellar-surface));
+    border-color: color-mix(in srgb, var(--node-color) 30%, var(--likcc-stellar-line));
+    box-shadow: 0 8px 20px color-mix(in srgb, var(--likcc-stellar-muted) 18%, transparent);
+    color: var(--likcc-stellar-strong);
+  }
+
+  .reading-shell.is-stellar .graph-node--leaf {
+    background: color-mix(in srgb, var(--node-color) 6%, var(--likcc-stellar-surface-soft));
+  }
+
+  .reading-shell.is-stellar .graph-node:hover,
+  .reading-shell.is-stellar .graph-node.is-active {
+    background: color-mix(in srgb, var(--node-color) 14%, var(--likcc-stellar-surface));
+    border-color: color-mix(in srgb, var(--node-color) 62%, var(--likcc-stellar-line));
+    box-shadow: 0 10px 24px color-mix(in srgb, var(--likcc-stellar-muted) 24%, transparent);
+  }
+
+  .reading-shell.is-stellar .node-icon {
+    background: color-mix(in srgb, var(--node-color) 14%, var(--likcc-stellar-surface));
+    color: var(--node-color);
+  }
+
+  /* 根节点不再自带深蓝底：改为星港玻璃，昼夜同一口径 */
+  .reading-shell.is-stellar .graph-node--root {
+    --node-color: var(--likcc-stellar-accent);
+    border-color: color-mix(in srgb, var(--likcc-stellar-accent) 38%, var(--likcc-stellar-line));
+    background: linear-gradient(
+      165deg,
+      color-mix(in srgb, var(--likcc-stellar-accent) 14%, var(--likcc-stellar-surface)),
+      var(--likcc-stellar-surface)
+    );
+    color: var(--likcc-stellar-strong);
+    box-shadow: 0 16px 34px color-mix(in srgb, var(--likcc-stellar-muted) 22%, transparent);
+  }
+
+  .reading-shell.is-stellar .graph-node--root::before {
+    border-color: color-mix(in srgb, var(--likcc-stellar-accent) 30%, transparent);
+  }
+
+  .reading-shell.is-stellar .graph-node--root .node-icon {
+    background: transparent;
+    color: var(--likcc-stellar-accent);
+    box-shadow: none;
+  }
+
+  .reading-shell.is-stellar .graph-node--root:hover,
+  .reading-shell.is-stellar .graph-node--root.is-active {
+    border-color: color-mix(in srgb, var(--likcc-stellar-accent) 62%, var(--likcc-stellar-line));
+    background: linear-gradient(
+      165deg,
+      color-mix(in srgb, var(--likcc-stellar-accent) 20%, var(--likcc-stellar-surface)),
+      var(--likcc-stellar-surface)
+    );
+    color: var(--likcc-stellar-strong);
+    box-shadow: 0 16px 34px color-mix(in srgb, var(--likcc-stellar-muted) 30%, transparent);
+  }
+
+  .reading-shell.is-stellar .graph-links path {
+    stroke: var(--likcc-reading-link);
+  }
+
+  .reading-shell.is-stellar .graph-dot {
+    fill: var(--likcc-stellar-surface);
+    stroke: var(--likcc-reading-link);
+  }
+
+  .reading-shell.is-stellar .reading-collapse {
+    border: 1px solid color-mix(in srgb, var(--likcc-stellar-accent) 22%, transparent);
+    border-radius: 6px;
+    background: var(--likcc-stellar-surface-soft);
+    padding: 0.14rem 0.46rem;
+  }
+
+  .reading-shell.is-stellar .reading-collapse:hover {
+    border-color: color-mix(in srgb, var(--likcc-stellar-accent) 44%, transparent);
+    background: color-mix(in srgb, var(--likcc-stellar-accent) 8%, transparent);
+    color: var(--likcc-stellar-accent);
+  }
+
+  /* 收起态沿用原有的上下发丝线结构，只把线与底换成主题口径 */
+  .reading-shell.is-stellar .reading-collapsed {
+    border-top-color: color-mix(in srgb, var(--likcc-stellar-accent) 26%, transparent);
+    border-bottom-color: color-mix(in srgb, var(--likcc-stellar-accent) 18%, transparent);
+    background: var(--likcc-stellar-surface-soft);
+    padding-inline: 0.5rem;
+  }
+
+  .reading-shell.is-stellar .reading-collapsed:hover {
+    border-top-color: color-mix(in srgb, var(--likcc-stellar-accent) 46%, transparent);
+    border-bottom-color: color-mix(in srgb, var(--likcc-stellar-accent) 30%, transparent);
+    background: color-mix(in srgb, var(--likcc-stellar-accent) 8%, var(--likcc-stellar-surface-soft));
+  }
+
   @media (max-width: 760px) {
     .reading-shell {
       padding: 0;

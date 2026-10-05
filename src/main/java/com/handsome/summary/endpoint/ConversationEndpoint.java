@@ -50,6 +50,7 @@ public class ConversationEndpoint implements CustomEndpoint {
     private static final String PET_ONLY_DISPLAY_MODE = "petOnly";
     private static final String DEFAULT_BUTTON_POSITION = "right";
     private static final String DEFAULT_STYLE_PRESET = "default";
+    private static final String STELLAR_STYLE_PRESET = StellarStyleSupport.STYLE_PRESET_STELLAR;
     private static final String DEFAULT_PRIMARY_COLOR = "#a16207";
     private static final String DEFAULT_SECONDARY_COLOR = "#f4f4f5";
     private static final String DEFAULT_SURFACE_COLOR = "#fafafa";
@@ -71,6 +72,12 @@ public class ConversationEndpoint implements CustomEndpoint {
 
     public record ConversationRequest(String conversationHistory) {}
     
+    /**
+     * 前台对话与助手配置。
+     *
+     * @param styleConfig 助手配色；星港模式下前台优先读取站点样式变量，此处的色板仅作兜底
+     * @param pet PetDex 宠物资源，保持原有下发口径
+     */
     public record DialogConfig(
         String assistantAvatar,
         String assistantName,
@@ -352,24 +359,42 @@ public class ConversationEndpoint implements CustomEndpoint {
                     var securityConfig = tuple.getT3();
                     var ragConfig = tuple.getT4();
                     var accessMode = aiRequestSecurityService.resolveAccessMode(securityConfig);
-                    var assistantName = normalizeAssistantName(assistantConfig.getAssistantName());
                     var displayMode = normalizeDisplayMode(assistantConfig.getDisplayMode());
+                    var styleConfig = assistantConfig.getStyleConfig();
+                    var stellar = isStellarStyle(styleConfig);
+                    // 先解析有效助手名称，再据此生成欢迎语，避免占位符落到旧默认名上
+                    var assistantName = stellar
+                        ? StellarStyleSupport.normalizeAssistantName(
+                            assistantConfig.getAssistantName())
+                        : normalizeAssistantName(assistantConfig.getAssistantName());
+                    var welcomeMessage = stellar
+                        ? StellarStyleSupport.resolveWelcomeMessage(
+                            assistantConfig.getWelcomeMessage())
+                        : assistantConfig.getWelcomeMessage();
+                    var quickQuestions = stellar
+                        ? StellarStyleSupport.resolveQuickQuestions(
+                            assistantConfig.getQuickQuestions())
+                        : assistantConfig.getQuickQuestions();
+                    var petSpeechMessages = resolvePetSpeechMessages(
+                        assistantConfig.getPetSpeechMessages(),
+                        assistantConfig.getPetOnlySpeechMessages(),
+                        displayMode, stellar);
+                    var petConfig = activePet.map(pet -> toPetConfig(pet, assistantConfig))
+                        .orElseGet(this::defaultPetConfig);
                     return new DialogConfig(
                         normalizeAvatarUrl(assistantConfig.getAssistantAvatar()),
                         assistantName,
                         displayMode,
                         !Boolean.FALSE.equals(ragConfig.getEnableRag()),
-                        normalizeWelcomeMessage(assistantConfig.getWelcomeMessage(),
-                            assistantName),
-                        normalizeQuickQuestions(assistantConfig.getQuickQuestions()),
-                        normalizeStyleConfig(assistantConfig.getStyleConfig()),
+                        normalizeWelcomeMessage(welcomeMessage, assistantName),
+                        normalizeQuickQuestions(quickQuestions),
+                        normalizeStyleConfig(styleConfig),
                         normalizeButtonPosition(assistantConfig.getButtonPosition()),
                         normalizeFloatingOffset(assistantConfig.getHorizontalOffset()),
                         normalizeFloatingOffset(assistantConfig.getVerticalOffset()),
                         normalizePetSize(assistantConfig.getPetSize()),
-                        resolvePetSpeechMessages(assistantConfig, displayMode),
-                        activePet.map(pet -> toPetConfig(pet, assistantConfig))
-                            .orElseGet(this::defaultPetConfig),
+                        petSpeechMessages,
+                        petConfig,
                         toAccessConfig(accessMode, tuple.getT5()),
                         tuple.getT2()
                     );
@@ -380,30 +405,37 @@ public class ConversationEndpoint implements CustomEndpoint {
             .onErrorResume(e -> {
                 log.error("获取对话框配置失败", e);
                 // 返回默认配置
-                var fallbackAssistantConfig = new SettingConfigGetter.AssistantConfig();
-                DialogConfig defaultConfig = new DialogConfig(
-                    SettingConfigGetter.AssistantConfig.DEFAULT_ASSISTANT_AVATAR,
-                    DEFAULT_ASSISTANT_NAME,
-                    DEFAULT_DISPLAY_MODE,
-                    true,
-                    normalizeWelcomeMessage(fallbackAssistantConfig.getWelcomeMessage(),
-                        DEFAULT_ASSISTANT_NAME),
-                    normalizeQuickQuestions(fallbackAssistantConfig.getQuickQuestions()),
-                    defaultStyleConfig(),
-                    DEFAULT_BUTTON_POSITION,
-                    DEFAULT_FLOATING_OFFSET,
-                    DEFAULT_FLOATING_OFFSET,
-                    SettingConfigGetter.AssistantConfig.DEFAULT_PET_SIZE,
-                    normalizePetSpeechMessages(fallbackAssistantConfig.getPetSpeechMessages(),
-                        fallbackAssistantConfig.getPetSpeechMessages()),
-                    defaultPetConfig(),
-                    toAccessConfig(AgentAccessMode.ANONYMOUS_CHAT_AGENT, false),
-                    AgentSettings.defaults()
-                );
                 return ServerResponse.ok()
                     .contentType(MediaType.APPLICATION_JSON)
-                    .bodyValue(defaultConfig);
+                    .bodyValue(buildDefaultDialogConfig());
             });
+    }
+
+    /**
+     * 兜底对话框配置。读取助手配置失败时无法判断站点是否选了星港模式，因此沿用旧默认口径。
+     */
+    private DialogConfig buildDefaultDialogConfig() {
+        var fallbackAssistantConfig = new SettingConfigGetter.AssistantConfig();
+        var assistantName = normalizeAssistantName(fallbackAssistantConfig.getAssistantName());
+        var displayMode = DEFAULT_DISPLAY_MODE;
+        return new DialogConfig(
+            SettingConfigGetter.AssistantConfig.DEFAULT_ASSISTANT_AVATAR,
+            assistantName,
+            displayMode,
+            true,
+            normalizeWelcomeMessage(fallbackAssistantConfig.getWelcomeMessage(), assistantName),
+            normalizeQuickQuestions(fallbackAssistantConfig.getQuickQuestions()),
+            defaultStyleConfig(),
+            DEFAULT_BUTTON_POSITION,
+            DEFAULT_FLOATING_OFFSET,
+            DEFAULT_FLOATING_OFFSET,
+            SettingConfigGetter.AssistantConfig.DEFAULT_PET_SIZE,
+            normalizePetSpeechMessages(fallbackAssistantConfig.getPetSpeechMessages(),
+                fallbackAssistantConfig.getPetSpeechMessages()),
+            defaultPetConfig(),
+            toAccessConfig(AgentAccessMode.ANONYMOUS_CHAT_AGENT, false),
+            AgentSettings.defaults()
+        );
     }
 
     private Mono<Boolean> isAuthenticated(ServerRequest request) {
@@ -436,15 +468,22 @@ public class ConversationEndpoint implements CustomEndpoint {
     }
 
     private List<String> resolvePetSpeechMessages(
-        SettingConfigGetter.AssistantConfig assistantConfig,
-        String displayMode
+        List<String> dialogMessages,
+        List<String> petOnlyMessages,
+        String displayMode,
+        boolean stellar
     ) {
         var defaults = new SettingConfigGetter.AssistantConfig();
-        return PET_ONLY_DISPLAY_MODE.equals(displayMode)
-            ? normalizePetSpeechMessages(assistantConfig.getPetOnlySpeechMessages(),
-                defaults.getPetOnlySpeechMessages())
-            : normalizePetSpeechMessages(assistantConfig.getPetSpeechMessages(),
-                defaults.getPetSpeechMessages());
+        if (PET_ONLY_DISPLAY_MODE.equals(displayMode)) {
+            var configured = stellar
+                ? StellarStyleSupport.resolvePetSpeechMessages(petOnlyMessages, true)
+                : petOnlyMessages;
+            return normalizePetSpeechMessages(configured, defaults.getPetOnlySpeechMessages());
+        }
+        var configured = stellar
+            ? StellarStyleSupport.resolvePetSpeechMessages(dialogMessages, false)
+            : dialogMessages;
+        return normalizePetSpeechMessages(configured, defaults.getPetSpeechMessages());
     }
 
     private List<String> normalizePetSpeechMessages(List<String> messages, List<String> fallback) {
@@ -566,18 +605,25 @@ public class ConversationEndpoint implements CustomEndpoint {
         );
     }
 
+    /**
+     * 判断当前助手是否处于星港模式。唯一开关是助手配色方案 stylePreset，
+     * 摘要框 uiStyle 只控制摘要框观感，不得触发助手身份与宠物口径切换。
+     */
+    private boolean isStellarStyle(SettingConfigGetter.AssistantStyleConfig assistantStyleConfig) {
+        var stylePreset = assistantStyleConfig != null
+            ? assistantStyleConfig.getStylePreset()
+            : null;
+        return StellarStyleSupport.isStellar(stylePreset);
+    }
+
     private String normalizeStylePreset(String stylePreset) {
-        if (!StringUtils.hasText(stylePreset)) {
-            return DEFAULT_STYLE_PRESET;
-        }
-        return switch (stylePreset.strip()) {
-            case "graphite", "ocean", "azure", "forest", "rose", "custom" -> stylePreset.strip();
-            default -> DEFAULT_STYLE_PRESET;
-        };
+        return StellarStyleSupport.resolveStylePreset(stylePreset);
     }
 
     private AssistantStylePalette paletteFor(String stylePreset) {
         return switch (stylePreset) {
+            case STELLAR_STYLE_PRESET -> new AssistantStylePalette("#6fe3ff", "#0d2233",
+                "#0a1a26", "#e8f7ff");
             case "graphite" -> new AssistantStylePalette("#d6b46c", "#2a2a28", "#171717",
                 "#f7f2e8");
             case "ocean" -> new AssistantStylePalette("#1f7a8c", "#d9f0f3", "#fbfeff",
@@ -714,26 +760,14 @@ public class ConversationEndpoint implements CustomEndpoint {
         );
     }
 
+    /**
+     * 解析摘要框 UI 风格：保留 inline/simple/classic 与 note/minimal/stripe/quiet 的旧口径，
+     * 新增 stellar 直通，前台据此渲染星港导读。
+     */
     private String resolveUiStyle(SettingConfigGetter.StyleConfig styleConfig) {
-        if (styleConfig.getUiStyle() != null) {
-            if ("simple".equals(styleConfig.getUiStyle())) {
-                return "simple";
-            }
-            if ("inline".equals(styleConfig.getUiStyle())) {
-                return "inline";
-            }
-            if ("note".equals(styleConfig.getUiStyle())
-                || "minimal".equals(styleConfig.getUiStyle())
-                || "stripe".equals(styleConfig.getUiStyle())
-                || "quiet".equals(styleConfig.getUiStyle())) {
-                return "simple";
-            }
-            return "classic";
-        }
-        if ("spotlight".equals(styleConfig.getThemeName())) {
-            return "simple";
-        }
-        return "simple";
+        var uiStyle = styleConfig != null ? styleConfig.getUiStyle() : null;
+        var themeName = styleConfig != null ? styleConfig.getThemeName() : null;
+        return StellarStyleSupport.resolveUiStyle(uiStyle, themeName);
     }
 
     private String resolveFixedTone(SettingConfigGetter.StyleConfig styleConfig) {

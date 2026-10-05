@@ -12,6 +12,10 @@ import {
 } from './petdex';
 import { normalizeAgentRuntimeConfig } from './agent/normalize';
 import { DEFAULT_RAG_ASSISTANT_STYLE, normalizeAssistantStyle } from './theme';
+import {
+  resolveStellarName, resolveStellarWelcome, resolveStellarList,
+  STELLAR_QUICK_QUESTIONS, STELLAR_PET_SPEECH, STELLAR_PET_ONLY_SPEECH,
+} from './stellar-identity';
 
 export const RAG_API_BASE = '/apis/api.summary.summaraidgpt.lik.cc/v1alpha1';
 const DEFAULT_FLOATING_OFFSET = 24;
@@ -171,25 +175,37 @@ export async function fetchRagConversation(
 
 function normalizeConfig(config: Partial<RagAssistantConfig>): RagAssistantConfig {
   const buttonPosition = String(config.buttonPosition).trim() === 'left' ? 'left' : 'right';
+  const styleConfig = normalizeAssistantStyle(config.styleConfig);
+  const stellar = styleConfig.stylePreset === 'stellar';
+  const assistantName = stellar ? resolveStellarName(config.assistantName) : normalizeAssistantName(config.assistantName);
+  const displayMode = normalizeDisplayMode(config.displayMode);
+  const legacyPetOnlySpeech = ['今天也要元气满满。', '我就在这里陪你逛逛。', '休息一下，看看风景吧。', '路过的时候记得摸摸我。'];
+  const quickQuestions = normalizeStringList(config.quickQuestions, 8, MAX_QUICK_QUESTION_CHARS);
+  const petSpeech = normalizeStringList(config.petSpeechMessages, 12);
 
   return {
     ...DEFAULT_RAG_ASSISTANT_CONFIG,
     ...config,
     buttonPosition,
     assistantAvatar: normalizeAvatarUrl(config.assistantAvatar),
-    assistantName: normalizeAssistantName(config.assistantName),
-    displayMode: normalizeDisplayMode(config.displayMode),
+    assistantName,
+    displayMode,
     ragEnabled: config.ragEnabled !== false,
-    welcomeMessage: normalizeWelcomeMessage(config.welcomeMessage, config.assistantName),
-    quickQuestions:
-      normalizeStringList(config.quickQuestions, 8, MAX_QUICK_QUESTION_CHARS)
-      || DEFAULT_QUICK_QUESTIONS,
-    styleConfig: normalizeAssistantStyle(config.styleConfig),
+    welcomeMessage: stellar
+      ? resolveStellarWelcome(config.welcomeMessage, assistantName)
+      : normalizeWelcomeMessage(config.welcomeMessage, config.assistantName),
+    quickQuestions: stellar
+      ? resolveStellarList(quickQuestions, DEFAULT_QUICK_QUESTIONS, STELLAR_QUICK_QUESTIONS)
+      : quickQuestions || DEFAULT_QUICK_QUESTIONS,
+    styleConfig,
     horizontalOffset: normalizeFloatingOffset(config.horizontalOffset),
     verticalOffset: normalizeFloatingOffset(config.verticalOffset),
     petSize: normalizePetSize(config.petSize),
-    petSpeechMessages:
-      normalizeStringList(config.petSpeechMessages, 12) || DEFAULT_RAG_PET_SPEECH_MESSAGES,
+    petSpeechMessages: stellar
+      ? resolveStellarList(petSpeech,
+        displayMode === 'petOnly' ? legacyPetOnlySpeech : DEFAULT_RAG_PET_SPEECH_MESSAGES,
+        displayMode === 'petOnly' ? STELLAR_PET_ONLY_SPEECH : STELLAR_PET_SPEECH)
+      : petSpeech || DEFAULT_RAG_PET_SPEECH_MESSAGES,
     pet: normalizePetConfig(config.pet) || DEFAULT_RAG_ASSISTANT_PET,
     access: normalizeAccessConfig(config.access),
     agent: normalizeAgentRuntimeConfig(config.agent),

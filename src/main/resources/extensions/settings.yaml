@@ -749,7 +749,9 @@ spec:
               value: inline
             - label: 简约卡片
               value: simple
-          help: "控制摘要框的布局和视觉样式"
+            - label: 星港导读
+              value: stellar
+          help: "控制摘要框的布局和视觉样式。选「星港导读」后摘要框改用主题星港口径：配色取自站点样式变量，昼夜优先读 html[data-scheme]，站点未给出对应变量时回退到主题星港色板。"
         - $formkit: select
           if: $get(uiStyle).value == "inline" || $get(uiStyle).value == "simple"
           name: fixedTone
@@ -1104,9 +1106,11 @@ spec:
                   value: forest
                 - label: 蔷薇
                   value: rose
+                - label: 星港终端
+                  value: stellar
                 - label: 自定义
                   value: custom
-              help: "选择内置配色；选自定义后可单独调整主色、辅色、背景和文字颜色。"
+              help: "选择内置配色；选自定义后可单独调整主色、辅色、背景和文字颜色。选「星港终端」后助手面板改走星港口径：外观取自站点样式变量与 html[data-scheme] 昼夜口径，前端会渲染星港徽记接管宠物形象，不再加载 PetDex 精灵图；助手名称与欢迎语留空或仍是内置默认文案时自动换成星港口径，你填写过的自定义内容一律保留。这是助手唯一的星港开关，摘要框的「星港导读」只改摘要框观感，不联动助手。"
             - $formkit: color
               if: "$get(assistantStylePreset).value === 'custom'"
               label: 主色

@@ -14,6 +14,8 @@
 | RAG 智能助手 | `assistant` | [RAG 智能助手](./rag-assistant.md) |
 | Agent 能力 | `agent` | [Agent 能力](./agent-settings.md) |
 
+使用 theme-xiaozhu2.0 时，可参考 [星港导读与星枢领航员](../stellar-theme.md)，开启可选星港风格、SVG 角色和对应用户侧文案。
+
 ## 配置前置条件
 
 - Halo 版本需要满足插件要求：`>= 2.25.0`。

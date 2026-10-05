@@ -15,9 +15,11 @@ import { markdownToHtml } from '../format';
 import { renderSourceList } from '../source-list';
 import { renderTyping } from './common';
 import type { RagAssistantMessage, RagSourceReference } from '../types';
+import { renderStellarEmblem } from './stellar-identity';
 
 export interface PetStageRenderOptions {
   assistantName: string;
+  stellar?: boolean;
   assistantAvatar?: string;
   avatarFallbackText: string;
   messages: RagAssistantMessage[];
@@ -61,10 +63,10 @@ export function renderPetStage(options: PetStageRenderOptions): TemplateResult {
             ?disabled=${!options.hasSources}
             @click=${options.onExpandLatestSources}
           >
-            ${questionAnswerIcon()} 关联资源
+            ${options.stellar ? renderStellarEmblem() : questionAnswerIcon()} ${options.stellar ? '信号来源' : '关联资源'}
           </button>
           <button class="pet-stage-action" type="button" @click=${options.onNewConversation}>
-            ${newChatIcon()} 新聊
+            ${newChatIcon()} ${options.stellar ? '开启新航次' : '新聊'}
           </button>
           ${options.streaming
             ? html`
@@ -169,7 +171,7 @@ function renderStageAvatar(options: PetStageRenderOptions): TemplateResult {
   const avatarUrl = options.assistantAvatar?.trim();
   return html`
     <span class=${avatarUrl ? 'pet-stage-avatar has-image' : 'pet-stage-avatar'} aria-hidden="true">
-      <span class="pet-stage-avatar-fallback">${options.avatarFallbackText}</span>
+      <span class="pet-stage-avatar-fallback">${options.stellar ? renderStellarEmblem() : options.avatarFallbackText}</span>
       ${avatarUrl
         ? html`
             <img
@@ -208,7 +210,7 @@ function renderStageSources(
       @toggle=${(event: Event) => options.onToggleSourceReferences(messageId, event)}
     >
       <summary>
-        ${questionAnswerIcon()} <span>${sources.length} 个关联资源</span>
+        ${options.stellar ? renderStellarEmblem() : questionAnswerIcon()} <span>${sources.length} 个${options.stellar ? '信号来源' : '关联资源'}</span>
       </summary>
       ${renderSourceList(sources)}
     </details>

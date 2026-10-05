@@ -37,6 +37,10 @@ import { renderPetPanel as renderPetPanelTemplate } from './renderers/pet-panel'
 import { renderPetStage as renderPetStageTemplate } from './renderers/pet-stage';
 import { renderSelectionPopover } from './renderers/selection-popover';
 import { applyAssistantTheme } from './theme';
+import { buildThemeObserver } from '../article-summary/shared';
+import { renderStellarDrone } from './renderers/stellar-identity';
+import { isDefaultAssistantAvatar, resolveStellarName, resolveStellarWelcome } from './stellar-identity';
+import { copyAssistantText } from './clipboard';
 import type {
   RagAssistantConfig,
   RagAssistantActivity,
@@ -186,6 +190,12 @@ export class RagAssistantWidget extends LitElement {
   private petAnimationTimer = 0;
   private petSpeechTimer = 0;
   private petSpeechHideTimer = 0;
+  private petSpeechStartTimer = 0;
+  private petPrepareGeneration = 0;
+  private lifecycleGeneration = 0;
+  private themeObservers: MutationObserver[] = [];
+  private colorSchemeQuery?: MediaQueryList;
+  private readonly refreshAssistantTheme = () => this.applyTheme();
   private readonly welcomeTime = formatTime();
   private readonly handleDocumentMouseUp = () => {
     window.setTimeout(() => this.updateSelectionPopup(), 0);
@@ -304,7 +314,11 @@ export class RagAssistantWidget extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
+    this.lifecycleGeneration += 1;
     this.applyTheme();
+    this.themeObservers = buildThemeObserver('', this.refreshAssistantTheme);
+    this.colorSchemeQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
+    this.bindColorSchemeListener(this.colorSchemeQuery);
     this.petPanelHeight = this.clampPetPanelHeight(this.loadSavedPetPanelHeight());
     this.floatingPositionLocked = this.applySavedFloatingPosition();
     this.bindSelectionListeners();
@@ -315,6 +329,12 @@ export class RagAssistantWidget extends LitElement {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
+    this.lifecycleGeneration += 1;
+    this.petPrepareGeneration += 1;
+    this.themeObservers.forEach((observer) => observer.disconnect());
+    this.themeObservers = [];
+    this.unbindColorSchemeListener(this.colorSchemeQuery);
+    this.colorSchemeQuery = undefined;
     this.unbindSelectionListeners();
     window.removeEventListener('resize', this.handleWindowResize);
     window.removeEventListener('summaraid:agent-status', this.handleAgentStatus);
@@ -374,7 +394,9 @@ export class RagAssistantWidget extends LitElement {
   }
 
   private async loadConfig(): Promise<void> {
+    const generation = this.lifecycleGeneration;
     const config = await fetchRagAssistantConfig();
+    if (!this.isConnected || generation !== this.lifecycleGeneration) return;
     this.config = config;
     this.configLoaded = true;
     this.applyTheme(config);
@@ -390,7 +412,9 @@ export class RagAssistantWidget extends LitElement {
   }
 
   private async initializeAssistant(): Promise<void> {
+    const generation = this.lifecycleGeneration;
     await this.loadConfig();
+    if (!this.isConnected || generation !== this.lifecycleGeneration) return;
     if (this.isPetOnlyMode) {
       this.open = false;
       this.petPanelOpen = false;
@@ -398,6 +422,7 @@ export class RagAssistantWidget extends LitElement {
       return;
     }
     await this.loadStoredConversation();
+    if (!this.isConnected || generation !== this.lifecycleGeneration) return;
     await this.resumeAgentAfterNavigationIfNeeded();
   }
 
@@ -437,14 +462,14 @@ export class RagAssistantWidget extends LitElement {
   }
 
   private renderBubble(): TemplateResult | typeof nothing {
-    if (!this.canRenderFloatingPet) {
+    if (!this.canRenderFloatingPet || (this.isStellar && this.open)) {
       return nothing;
     }
 
     const speech = this.petPanelOpen ? '' : this.getCurrentPetSpeech();
 
     return html`
-      <span class=${this.petPanelOpen ? 'bubble-wrapper panel-open' : 'bubble-wrapper'}>
+      <span class=${this.petPanelOpen ? 'bubble-wrapper panel-open' : 'bubble-wrapper'} style=${this.petButtonStyle}>
         ${this.petPanelOpen && !this.open ? this.renderPetPanel() : nothing}
         <button
           class=${this.draggingBubble ? 'bubble pet-button dragging' : 'bubble pet-button'}
@@ -454,12 +479,16 @@ export class RagAssistantWidget extends LitElement {
           @click=${this.handleBubbleClick}
           @mouseenter=${this.handlePetMouseEnter}
           @mouseleave=${this.handlePetMouseLeave}
-          aria-label=${this.isPetOnlyMode ? '互动宠物' : '打开智能助手'}
+          aria-label=${this.isStellar
+            ? (this.isPetOnlyMode ? '向星枢领航员打招呼' : `接通${this.assistantName}`)
+            : (this.isPetOnlyMode ? '互动宠物' : '打开智能助手')}
         >
           ${speech
             ? html`<span class=${this.petSpeechVisible ? 'pet-speech visible' : 'pet-speech'}>${speech}</span>`
             : nothing}
-          <span class="pet-sprite" style=${this.petSpriteStyle} aria-hidden="true"></span>
+          ${this.isStellar
+            ? html`<span class="stellar-pet" data-state=${this.stellarPetState} data-direction=${this.petDragDirection} aria-hidden="true">${renderStellarDrone()}</span>`
+            : html`<span class="pet-sprite" style=${this.petSpriteStyle} aria-hidden="true"></span>`}
         </button>
       </span>
     `;
@@ -468,7 +497,8 @@ export class RagAssistantWidget extends LitElement {
   private renderPetPanel(): TemplateResult {
     return renderPetPanelTemplate({
       assistantName: this.assistantName,
-      assistantAvatar: this.config.assistantAvatar,
+      assistantAvatar: this.effectiveAssistantAvatar,
+      stellar: this.isStellar,
       avatarFallbackText: this.avatarFallbackText,
       streaming: this.streaming,
       statusText: this.panelStatusText,
@@ -500,7 +530,8 @@ export class RagAssistantWidget extends LitElement {
   private renderStage(): TemplateResult {
     return renderPetStageTemplate({
       assistantName: this.assistantName,
-      assistantAvatar: this.config.assistantAvatar,
+      assistantAvatar: this.effectiveAssistantAvatar,
+      stellar: this.isStellar,
       avatarFallbackText: this.avatarFallbackText,
       messages: this.messages,
       statusText: this.panelStatusText,
@@ -536,6 +567,7 @@ export class RagAssistantWidget extends LitElement {
       this.selectionPopup,
       () => this.askWithSelection(),
       this.selectionActionLabel,
+      this.isStellar,
     );
   }
 
@@ -740,6 +772,9 @@ export class RagAssistantWidget extends LitElement {
 
     if (nextPosition.x !== this.floatingPosition.x || nextPosition.y !== this.floatingPosition.y) {
       this.setFloatingPosition(nextPosition, true);
+    } else {
+      // 视口变化时坐标可能仍合法，但面板应该展开的方向已经改变。
+      this.position = nextPosition.x + this.bubbleWidth / 2 < window.innerWidth / 2 ? 'left' : 'right';
     }
   }
 
@@ -791,12 +826,19 @@ export class RagAssistantWidget extends LitElement {
   }
 
   private async preparePetSprite(config: RagAssistantConfig): Promise<void> {
+    const generation = ++this.petPrepareGeneration;
     this.stopPetAnimation();
     this.stopPetSpeechCycle();
     this.petSpriteReady = false;
     this.petSpeechVisible = false;
     this.petSpeechText = '';
 
+    // 星港角色是本地 SVG，不依赖 PetDex、精灵图下载或逐帧计时。
+    if (this.isStellar) {
+      this.petSpriteReady = true;
+      this.startPetSpeechCycle();
+      return;
+    }
     const spritesheetUrl = config.pet?.spritesheetUrl?.trim();
     if (!spritesheetUrl) {
       return;
@@ -804,14 +846,14 @@ export class RagAssistantWidget extends LitElement {
 
     try {
       await this.preloadImage(spritesheetUrl);
-      if (this.petSpriteUrl !== spritesheetUrl) {
+      if (!this.isConnected || generation !== this.petPrepareGeneration || this.isStellar || this.petSpriteUrl !== spritesheetUrl) {
         return;
       }
       this.petSpriteReady = true;
       this.startPetAnimation();
       this.startPetSpeechCycle();
     } catch {
-      if (this.petSpriteUrl === spritesheetUrl) {
+      if (this.isConnected && generation === this.petPrepareGeneration && !this.isStellar && this.petSpriteUrl === spritesheetUrl) {
         this.petSpriteReady = false;
       }
     }
@@ -836,7 +878,7 @@ export class RagAssistantWidget extends LitElement {
   }
 
   private startPetAnimation(): void {
-    if (this.petAnimationTimer || !this.canRenderFloatingPet) {
+    if (this.isStellar || this.petAnimationTimer || !this.canRenderFloatingPet) {
       return;
     }
     this.petAnimationTimer = window.setInterval(() => {
@@ -856,11 +898,18 @@ export class RagAssistantWidget extends LitElement {
     if (this.petSpeechTimer || !this.canRenderFloatingPet) {
       return;
     }
-    window.setTimeout(() => this.showNextPetSpeech(), 1600);
+    this.petSpeechStartTimer = window.setTimeout(() => {
+      this.petSpeechStartTimer = 0;
+      if (this.isConnected) this.showNextPetSpeech();
+    }, 1600);
     this.petSpeechTimer = window.setInterval(() => this.showNextPetSpeech(), 15000);
   }
 
   private stopPetSpeechCycle(): void {
+    if (this.petSpeechStartTimer) {
+      window.clearTimeout(this.petSpeechStartTimer);
+      this.petSpeechStartTimer = 0;
+    }
     if (this.petSpeechTimer) {
       window.clearInterval(this.petSpeechTimer);
       this.petSpeechTimer = 0;
@@ -905,7 +954,7 @@ export class RagAssistantWidget extends LitElement {
       this.showPetThinkingSpeech();
       return;
     }
-    if (this.petSpeechText === PETDEX_THINKING_SPEECH_MESSAGE) {
+    if (this.petSpeechText === this.thinkingSpeechMessage) {
       this.petSpeechVisible = false;
       this.petSpeechText = '';
     }
@@ -915,7 +964,7 @@ export class RagAssistantWidget extends LitElement {
     if (this.draggingBubble) {
       return;
     }
-    this.petSpeechText = PETDEX_THINKING_SPEECH_MESSAGE;
+    this.petSpeechText = this.thinkingSpeechMessage;
     this.petSpeechVisible = true;
     if (this.petSpeechHideTimer) {
       window.clearTimeout(this.petSpeechHideTimer);
@@ -1036,7 +1085,10 @@ export class RagAssistantWidget extends LitElement {
     this.streaming = true;
     this.agentActivities = [];
     this.appendAgentActivity(this.useAgentChat ? '正在准备 Agent' : '正在检索知识库', 'pending');
-    this.abortController = new AbortController();
+    // 本次请求独占一个 controller：实例字段只作“当前请求”的索引，
+    // 旧请求结算时据此判断自己是否仍是当前请求，不会清掉后来者的状态。
+    const controller = new AbortController();
+    this.abortController = controller;
 
     this.messages = [
       ...this.messages,
@@ -1052,29 +1104,53 @@ export class RagAssistantWidget extends LitElement {
     this.resizeInput(this.petInputElement);
     this.scrollToBottom();
 
+    // 等首帧期间可能已被停止、被新请求接管或已离场：不再启动请求流，也不覆盖后来者的 client。
+    if (!this.isActiveRequest(controller)) {
+      this.finishAssistantMessage(assistantMessageId);
+      if (this.abortController === controller) {
+        this.streaming = false;
+        this.abortController = undefined;
+        this.agentChatClient = undefined;
+      }
+      return;
+    }
+
     try {
       if (this.useAgentChat) {
-        await this.askAgentStream(requestQuestion, assistantMessageId);
+        await this.askAgentStream(requestQuestion, assistantMessageId, controller);
       } else {
-        await this.askRagStream(requestQuestion, assistantMessageId);
+        await this.askRagStream(requestQuestion, assistantMessageId, controller);
       }
     } catch (error) {
-      if (this.abortController.signal.aborted) {
+      // 已停止、已离场或已被新请求接管时不报错：这次请求的结果不该再影响界面。
+      if (!this.isActiveRequest(controller)) {
         return;
       }
       const message = error instanceof Error ? error.message : '智能助手回答失败';
       this.failAssistantMessage(assistantMessageId, `抱歉，暂时无法回答，请稍后重试。${message ? `（${message}）` : ''}`);
     } finally {
+      // 收尾只针对本条消息；共享字段仅在仍是当前请求时才归还，避免抹掉后来者的流。
+      const owned = this.abortController === controller;
       this.finishAssistantMessage(assistantMessageId);
-      this.streaming = false;
-      this.abortController = undefined;
-      this.agentChatClient = undefined;
+      if (owned) {
+        this.streaming = false;
+        this.abortController = undefined;
+        this.agentChatClient = undefined;
+      }
       await this.updateComplete;
-      this.scrollToBottom();
+      if (owned) {
+        this.scrollToBottom();
+      }
     }
   }
 
-  private async askAgentStream(question: string, assistantMessageId: string): Promise<void> {
+  private async askAgentStream(
+    question: string,
+    assistantMessageId: string,
+    controller: AbortController,
+  ): Promise<void> {
+    // 入口守卫：已停止、已离场或被新请求接管时一律不启动，避免覆盖后来者的 client。
+    if (!this.isActiveRequest(controller)) return;
     this.appendAgentActivity('正在调用 Agent', 'pending');
     const client = new AgentChatClient();
     this.agentChatClient = client;
@@ -1089,12 +1165,19 @@ export class RagAssistantWidget extends LitElement {
           visitorId: this.visitorId,
           ragEnabledForAgent: this.shouldAttachRagToAgent,
           afterNavigationDisplayMode: this.open ? 'stage' : 'panel',
-          signal: this.abortController?.signal,
+          signal: controller.signal,
         },
         {
-          onText: (text) => this.setAssistantContent(assistantMessageId, text),
-          onSources: (sources) => this.receiveSources(assistantMessageId, sources),
+          onText: (text) => {
+            if (!this.isActiveRequest(controller)) return;
+            this.setAssistantContent(assistantMessageId, text);
+          },
+          onSources: (sources) => {
+            if (!this.isActiveRequest(controller)) return;
+            this.receiveSources(assistantMessageId, sources);
+          },
           onError: (error) => {
+            if (!this.isActiveRequest(controller)) return;
             if (this.isAgentToolCallStreamProtocolError(error)) {
               this.appendAgentActivity('当前模型的工具调用流格式不兼容', 'warning');
               return;
@@ -1102,23 +1185,34 @@ export class RagAssistantWidget extends LitElement {
             this.failAssistantMessage(assistantMessageId, error);
           },
           onFinish: (historyMessages) => {
+            if (!this.isActiveRequest(controller)) return;
             this.agentHistoryMessages = historyMessages;
           },
         },
       );
-      this.agentHistoryMessages = messages;
+      // 旧请求的返回值不得覆盖新会话历史：只有仍属本次请求时才落库。
+      if (this.isActiveRequest(controller)) {
+        this.agentHistoryMessages = messages;
+      }
     } catch (error) {
       if (!this.isAgentToolCallStreamProtocolError(error)) {
         throw error;
       }
       client.stop();
-      this.agentChatClient = undefined;
+      if (this.agentChatClient === client) {
+        this.agentChatClient = undefined;
+      }
+      // 已停止或已离场：不回退、不改写消息，交给外层按“非当前请求”静默收尾。
+      if (!this.isActiveRequest(controller)) {
+        return;
+      }
       if (!this.canFallbackToRagChat) {
         throw new Error('当前模型的工具调用流格式不兼容，无法继续使用 Agent 模式');
       }
       this.resetAssistantMessageForFallback(assistantMessageId);
       this.appendAgentActivity('已切换为知识库问答模式', 'warning');
-      await this.askRagStream(question, assistantMessageId);
+      // 回退沿用同一个 controller：归属与停止语义都不变。
+      await this.askRagStream(question, assistantMessageId, controller);
     }
   }
 
@@ -1129,7 +1223,9 @@ export class RagAssistantWidget extends LitElement {
     const assistantMessageId = createMessageId();
     this.petPanelOpen = true;
     this.streaming = true;
-    this.abortController = new AbortController();
+    // 与手动提问同一口径：本次请求独占 controller，实例字段只作当前请求索引。
+    const controller = new AbortController();
+    this.abortController = controller;
     this.agentActivities = [];
     this.appendAgentActivity('页面已打开，正在继续回答', 'pending');
     this.messages = [
@@ -1141,6 +1237,17 @@ export class RagAssistantWidget extends LitElement {
     ];
     await this.updateComplete;
     this.scrollToBottom();
+
+    // 等首帧期间可能已被停止、被新请求接管或已离场：不再启动请求流。
+    if (!this.isActiveRequest(controller)) {
+      this.finishAssistantMessage(assistantMessageId);
+      if (this.abortController === controller) {
+        this.streaming = false;
+        this.abortController = undefined;
+        this.agentChatClient = undefined;
+      }
+      return;
+    }
 
     const client = new AgentChatClient();
     this.agentChatClient = client;
@@ -1155,12 +1262,19 @@ export class RagAssistantWidget extends LitElement {
           recordUserMessage: false,
           ragEnabledForAgent: this.shouldAttachRagToAgent,
           afterNavigationDisplayMode: this.open ? 'stage' : 'panel',
-          signal: this.abortController.signal,
+          signal: controller.signal,
         },
         {
-          onText: (text) => this.setAssistantContent(assistantMessageId, text),
-          onSources: (sources) => this.receiveSources(assistantMessageId, sources),
+          onText: (text) => {
+            if (!this.isActiveRequest(controller)) return;
+            this.setAssistantContent(assistantMessageId, text);
+          },
+          onSources: (sources) => {
+            if (!this.isActiveRequest(controller)) return;
+            this.receiveSources(assistantMessageId, sources);
+          },
           onError: (error) => {
+            if (!this.isActiveRequest(controller)) return;
             if (this.isAgentToolCallStreamProtocolError(error)) {
               this.appendAgentActivity('当前模型的工具调用流格式不兼容', 'warning');
               return;
@@ -1168,16 +1282,22 @@ export class RagAssistantWidget extends LitElement {
             this.failAssistantMessage(assistantMessageId, error);
           },
           onFinish: (historyMessages) => {
+            if (!this.isActiveRequest(controller)) return;
             this.agentHistoryMessages = historyMessages;
           },
         },
       );
-      this.agentHistoryMessages = messages;
+      // 旧请求的返回值不得覆盖新会话历史：只有仍属本次请求时才落库。
+      if (this.isActiveRequest(controller)) {
+        this.agentHistoryMessages = messages;
+      }
     } catch (error) {
-      if (!this.abortController.signal.aborted) {
+      if (this.isActiveRequest(controller)) {
         if (this.isAgentToolCallStreamProtocolError(error)) {
           client.stop();
-          this.agentChatClient = undefined;
+          if (this.agentChatClient === client) {
+            this.agentChatClient = undefined;
+          }
           if (!this.canFallbackToRagChat) {
             this.failAssistantMessage(
               assistantMessageId,
@@ -1187,26 +1307,39 @@ export class RagAssistantWidget extends LitElement {
           }
           this.resetAssistantMessageForFallback(assistantMessageId);
           this.appendAgentActivity('已切换为知识库问答模式', 'warning');
-          await this.askRagStream(resume.message, assistantMessageId);
+          // 回退沿用同一个 controller：归属与停止语义都不变。
+          await this.askRagStream(resume.message, assistantMessageId, controller);
           return;
         }
         const message = error instanceof Error ? error.message : 'Agent 恢复回答失败';
         this.failAssistantMessage(assistantMessageId, message);
       }
     } finally {
+      // 收尾只针对本条消息；共享字段仅在仍是当前请求时才归还，避免抹掉后来者的流。
+      const owned = this.abortController === controller;
       this.finishAssistantMessage(assistantMessageId);
-      this.streaming = false;
-      this.abortController = undefined;
-      this.agentChatClient = undefined;
+      if (owned) {
+        this.streaming = false;
+        this.abortController = undefined;
+        this.agentChatClient = undefined;
+      }
       await this.updateComplete;
-      this.scrollToBottom();
+      if (owned) {
+        this.scrollToBottom();
+      }
     }
   }
 
-  private async askRagStream(question: string, assistantMessageId: string): Promise<void> {
+  private async askRagStream(
+    question: string,
+    assistantMessageId: string,
+    controller: AbortController,
+  ): Promise<void> {
     if (!this.useRagChat) {
       throw new Error('当前模式没有启用 RAG 知识库问答');
     }
+    // 入口守卫：已停止、已离场或被新请求接管时不发起新流。
+    if (!this.isActiveRequest(controller)) return;
     await askRagStream(
       {
         question,
@@ -1215,19 +1348,33 @@ export class RagAssistantWidget extends LitElement {
         visitorId: this.visitorId,
       },
       {
-        onConversationId: (conversationId) => this.persistConversationId(conversationId),
+        // 会话号只要求“仍属本次请求且没被新请求接管”，用户主动停止也照样落库。
+        onConversationId: (conversationId) => {
+          if (!this.ownsRequest(controller)) return;
+          this.persistConversationId(conversationId);
+        },
         onSources: (sources) => {
+          if (!this.isActiveRequest(controller)) return;
           this.appendAgentActivity(
             sources.length ? `知识库命中 ${sources.length} 个来源` : '知识库没有命中来源',
             sources.length ? 'success' : 'warning',
           );
           this.receiveSources(assistantMessageId, sources);
         },
-        onDelta: (delta) => this.appendAssistantDelta(assistantMessageId, delta),
-        onError: (error) => this.failAssistantMessage(assistantMessageId, error),
-        onDone: () => this.finishAssistantMessage(assistantMessageId),
+        onDelta: (delta) => {
+          if (!this.isActiveRequest(controller)) return;
+          this.appendAssistantDelta(assistantMessageId, delta);
+        },
+        onError: (error) => {
+          if (!this.isActiveRequest(controller)) return;
+          this.failAssistantMessage(assistantMessageId, error);
+        },
+        onDone: () => {
+          if (!this.isActiveRequest(controller)) return;
+          this.finishAssistantMessage(assistantMessageId);
+        },
       },
-      this.abortController?.signal,
+      controller.signal,
     );
   }
 
@@ -1636,6 +1783,45 @@ export class RagAssistantWidget extends LitElement {
     });
   }
 
+  /**
+   * 请求归属判据：元素仍在线，且实例字段指向的就是这次请求。
+   * 不看中止状态，供“用户主动停止也要保留”的落库型回调使用。
+   */
+  private ownsRequest(controller: AbortController): boolean {
+    return this.isConnected && this.abortController === controller;
+  }
+
+  /**
+   * 请求仍生效判据：在归属之上再排除已中止的请求。
+   * 所有会改写界面或消息的回调都要先过这一关，否则旧请求的迟到回调会写进新会话。
+   */
+  private isActiveRequest(controller: AbortController): boolean {
+    return this.ownsRequest(controller) && !controller.signal.aborted;
+  }
+
+  /** 昼夜偏好监听：老 Safari 只有 addListener/removeListener，两条通道都要接住。 */
+  private bindColorSchemeListener(query?: MediaQueryList): void {
+    if (!query) {
+      return;
+    }
+    if (typeof query.addEventListener === 'function') {
+      query.addEventListener('change', this.refreshAssistantTheme);
+      return;
+    }
+    query.addListener?.(this.refreshAssistantTheme);
+  }
+
+  private unbindColorSchemeListener(query?: MediaQueryList): void {
+    if (!query) {
+      return;
+    }
+    if (typeof query.removeEventListener === 'function') {
+      query.removeEventListener('change', this.refreshAssistantTheme);
+      return;
+    }
+    query.removeListener?.(this.refreshAssistantTheme);
+  }
+
   private abortCurrentRequest(): void {
     this.agentChatClient?.stop();
     this.agentChatClient = undefined;
@@ -1670,15 +1856,11 @@ export class RagAssistantWidget extends LitElement {
     if (!content) {
       return;
     }
-    try {
-      if (!navigator.clipboard?.writeText) {
-        throw new Error('Clipboard API is unavailable');
-      }
-      await navigator.clipboard.writeText(content);
-      this.appendAgentActivity('已复制到剪贴板', 'success');
-    } catch {
-      this.appendAgentActivity('复制失败，请手动选择文本', 'error');
-    }
+    const copied = await copyAssistantText(content);
+    this.appendAgentActivity(
+      copied ? '已复制到剪贴板' : '复制未能完成，请手动选择文本',
+      copied ? 'success' : 'error',
+    );
   }
 
   private retryMessage(message: RagAssistantMessage): void {
@@ -1722,8 +1904,29 @@ export class RagAssistantWidget extends LitElement {
     return this.expandedSourceMessageIds.includes(messageId);
   }
 
+  private get isStellar(): boolean {
+    return this.config.styleConfig.stylePreset === 'stellar';
+  }
+
+  private get effectiveAssistantAvatar(): string | undefined {
+    return this.isStellar && isDefaultAssistantAvatar(this.config.assistantAvatar)
+      ? undefined : this.config.assistantAvatar;
+  }
+
+  private get stellarPetState(): 'idle' | 'hover' | 'thinking' | 'error' | 'dragging' {
+    if (this.draggingBubble) return 'dragging';
+    if (this.petErrorUntil > Date.now()) return 'error';
+    if (this.streaming) return 'thinking';
+    return this.petHovering ? 'hover' : 'idle';
+  }
+
+  private get thinkingSpeechMessage(): string {
+    return this.isStellar ? '正在校准星图，解码你的问题…' : PETDEX_THINKING_SPEECH_MESSAGE;
+  }
+
   private get assistantName(): string {
-    return this.config.assistantName || DEFAULT_RAG_ASSISTANT_CONFIG.assistantName;
+    return this.isStellar ? resolveStellarName(this.config.assistantName)
+      : this.config.assistantName || DEFAULT_RAG_ASSISTANT_CONFIG.assistantName;
   }
 
   private get isPetOnlyMode(): boolean {
@@ -1761,6 +1964,7 @@ export class RagAssistantWidget extends LitElement {
     if (!this.canUseSelectedChatMode) {
       return this.chatModeUnavailableMessage;
     }
+    if (this.isStellar) return this.selectedContext ? '发来问题，一起解读这段信号…' : '发来问题，检索星港记录…';
     if (this.selectedContext) {
       return '想问这段内容什么？';
     }
@@ -1778,7 +1982,19 @@ export class RagAssistantWidget extends LitElement {
   }
 
   private get petPanelStyle(): string {
-    return `--rag-pet-panel-height:${Math.round(this.clampPetPanelHeight(this.petPanelHeight))}px`;
+    const height = Math.round(this.clampPetPanelHeight(this.petPanelHeight));
+    const sizeStyle = `--rag-pet-panel-height:${height}px`;
+    if (!this.isStellar) return sizeStyle;
+    // 面板独立钳制在视口内：拖动到中间、靠近顶部或缩放窗口都不能把输入区挤出屏幕。
+    const margin = 12;
+    const width = Math.min(window.innerWidth <= 860 ? 368 : 410, window.innerWidth - margin * 2);
+    const position = this.floatingPosition || this.defaultFloatingPosition(this.config);
+    const rightSide = position.x + this.bubbleWidth / 2 >= window.innerWidth / 2;
+    const preferredLeft = rightSide ? position.x + this.bubbleWidth - width : position.x;
+    const left = this.clamp(preferredLeft, margin, window.innerWidth - width - margin);
+    const panelHeight = Math.min(height, window.innerHeight - margin * 2);
+    const top = this.clamp(position.y - PET_PANEL_TOP_GAP - panelHeight, margin, window.innerHeight - panelHeight - margin);
+    return `${sizeStyle};position:fixed;left:${Math.round(left)}px;right:auto;top:${Math.round(top)}px;bottom:auto;height:${panelHeight}px`;
   }
 
   private get latestAssistantMessageWithSources(): RagAssistantMessage | undefined {
@@ -1796,6 +2012,7 @@ export class RagAssistantWidget extends LitElement {
     if (this.streaming && latest) {
       return latest;
     }
+    if (this.isStellar) return this.streaming ? '正在解码信号' : '星港通讯已就绪';
     return this.streaming ? '正在找答案' : '想问我什么？';
   }
 
@@ -1841,6 +2058,7 @@ export class RagAssistantWidget extends LitElement {
   }
 
   private get selectionActionLabel(): string {
+    if (this.isStellar) return `询问${this.assistantName}`;
     return this.isRagOnlyMode ? '问知识库' : '问助手';
   }
 
@@ -1853,6 +2071,10 @@ export class RagAssistantWidget extends LitElement {
   }
 
   private get petMetrics(): ReturnType<typeof getPetdexMetrics> {
+    if (this.isStellar) {
+      const width = this.petSize;
+      return { width, height: Math.round(width * 108 / 96), sheetWidth: width, sheetHeight: Math.round(width * 108 / 96) };
+    }
     return getPetdexMetrics(this.petSize);
   }
 
@@ -1908,7 +2130,7 @@ export class RagAssistantWidget extends LitElement {
   }
 
   private get hasActivePet(): boolean {
-    return Boolean(this.config.pet?.spritesheetUrl);
+    return this.isStellar || Boolean(this.config.pet?.spritesheetUrl);
   }
 
   private get canRenderFloatingPet(): boolean {
@@ -1935,6 +2157,7 @@ export class RagAssistantWidget extends LitElement {
   }
 
   private get welcomeMessage(): string {
+    if (this.isStellar) return resolveStellarWelcome(this.config.welcomeMessage, this.assistantName);
     return (this.config.welcomeMessage || DEFAULT_RAG_ASSISTANT_CONFIG.welcomeMessage)
       .replace('{assistantName}', this.assistantName);
   }

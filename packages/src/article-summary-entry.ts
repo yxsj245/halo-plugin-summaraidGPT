@@ -34,6 +34,8 @@ const PROCESSED_DATA_ATTR = 'data-summary-lit-mounted';
 const PROCESSED_SILENT_ATTR = 'data-summary-silent-processed';
 let initTimer: number | undefined;
 let domObserver: MutationObserver | undefined;
+/** 在途挂载：配置请求期间同一批占位标签只能被处理一次，避免并发事件重复挂载。 */
+let mountInFlight: Promise<(ArticleSummaryWidget | ArticleReadingWidget)[]> | undefined;
 
 function printBanner(): void {
   if (window.likcc_summaraidGPT_scriptLoaded) {
@@ -72,11 +74,17 @@ function applyReadingConfig(
 ): void {
   element.postName = source.getAttribute('name') || '';
   element.darkSelector = config.darkSelector || '';
+  // 洞察图谱跟随摘要框选择的界面口径（含星港），站点未选时维持既有的简约观感
+  element.uiStyle = config.uiStyle || 'simple';
   element.defaultCollapsed = config.readingDefaultCollapsed ?? false;
 }
 
-async function mountSummaryWidgets(
-  userConfig: Partial<SummaryWidgetConfig> = {},
+/**
+ * 真正执行挂载。占位标签在请求配置之前就标记为已处理，
+ * 这样并发的 DOM 观察事件不会把同一批标签再选一遍；配置返回后只替换仍在文档里的标签。
+ */
+async function performMount(
+  userConfig: Partial<SummaryWidgetConfig>,
 ): Promise<(ArticleSummaryWidget | ArticleReadingWidget)[]> {
   const widgets = Array.from(
     document.querySelectorAll<HTMLElement>(
@@ -93,26 +101,70 @@ async function mountSummaryWidgets(
     return [];
   }
 
+  const placeholders = [...widgets, ...readingWidgets];
+  placeholders.forEach((widget) => widget.setAttribute(PROCESSED_DATA_ATTR, 'true'));
+
   const apiConfig = await fetchSummaryConfig();
   const config = { ...apiConfig, ...userConfig };
 
-  const summaries = widgets.map((widget) => {
+  const mounted: (ArticleSummaryWidget | ArticleReadingWidget)[] = [];
+
+  widgets.forEach((widget) => {
+    // 配置请求期间页面可能已被导航替换，离场标签不再替换，标记随节点一起消失
+    if (!widget.isConnected) {
+      return;
+    }
     const summary = document.createElement(SUMMARY_COMPONENT_TAG) as ArticleSummaryWidget;
     applyConfig(summary, config, widget);
-    widget.setAttribute(PROCESSED_DATA_ATTR, 'true');
     widget.replaceWith(summary);
-    return summary;
+    mounted.push(summary);
   });
 
-  const readings = readingWidgets.map((widget) => {
+  readingWidgets.forEach((widget) => {
+    if (!widget.isConnected) {
+      return;
+    }
     const reading = document.createElement(READING_COMPONENT_TAG) as ArticleReadingWidget;
     applyReadingConfig(reading, config, widget);
-    widget.setAttribute(PROCESSED_DATA_ATTR, 'true');
     widget.replaceWith(reading);
-    return reading;
+    mounted.push(reading);
   });
 
-  return [...summaries, ...readings];
+  return mounted;
+}
+
+/** 仍有未被这一轮挂载处理掉的占位标签（多半是配置请求期间被导航换进来的新正文）。 */
+function hasUnprocessedPlaceholders(): boolean {
+  return document.querySelector(
+    `${SUMMARY_WIDGET_SELECTOR}:not([${PROCESSED_DATA_ATTR}="true"]),`
+    + `${READING_WIDGET_SELECTOR}:not([${PROCESSED_DATA_ATTR}="true"])`,
+  ) !== null;
+}
+
+/**
+ * 对外入口。刻意不加 async：并发调用必须拿到同一个 promise 对象，
+ * 否则每次调用都会包一层新 promise，调用方无法判断“这是正在跑的那一轮”。
+ */
+function mountSummaryWidgets(
+  userConfig: Partial<SummaryWidgetConfig> = {},
+): Promise<(ArticleSummaryWidget | ArticleReadingWidget)[]> {
+  if (mountInFlight) {
+    return mountInFlight;
+  }
+
+  const task = performMount(userConfig).finally(() => {
+    if (mountInFlight === task) {
+      mountInFlight = undefined;
+    }
+
+    // 在途期间的并发调用拿到的是同一个 promise，此时如果已经进来一批新占位（导航替换正文），
+    // 它们既没被这一轮选中、也没人再触发观察回调，必须由这里补一轮重扫，否则会永久漏挂。
+    if (hasUnprocessedPlaceholders()) {
+      scheduleAutoInit();
+    }
+  });
+  mountInFlight = task;
+  return task;
 }
 
 async function fetchSummaryContentSilent(): Promise<void> {
@@ -125,7 +177,7 @@ async function fetchSummaryContentSilent(): Promise<void> {
   await Promise.all(
     dataWidgets.map(async (widget) => {
       const postName = widget.getAttribute('name');
-      if (!postName) {
+      if (!postName || !widget.isConnected) {
         return;
       }
 
@@ -146,6 +198,8 @@ async function autoInitSummaryBox(): Promise<void> {
   const dataWidgets = document.querySelectorAll(SUMMARY_DATA_SELECTOR);
   const mountedSummary = document.querySelector(SUMMARY_COMPONENT_TAG);
 
+  // 摘要框 UI 关闭时后端只注入 <ai-summaraidGPT-reading>（甚至只注入隐藏数据标签），
+  // 这里按占位标签各自判断：图谱只要占位存在就独立挂载，不依赖摘要框是否注入。
   if (widgets.length > 0 || readingWidgets.length > 0) {
     await mountSummaryWidgets();
     return;
@@ -163,7 +217,10 @@ function scheduleAutoInit(): void {
 
   initTimer = window.setTimeout(() => {
     initTimer = undefined;
-    void autoInitSummaryBox();
+    // 定时触发的初始化失败不应变成未处理的 promise 拒绝，静默记一条日志即可
+    void autoInitSummaryBox().catch((error: unknown) => {
+      console.warn('摘要框初始化失败:', error);
+    });
   }, 0);
 }
 
