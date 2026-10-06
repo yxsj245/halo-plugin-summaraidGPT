@@ -35,36 +35,70 @@ spec:
               attrs:
                 type: text/javascript
               children: |
-                async function syncAllSummary() {
-                  const btn = document.getElementById('syncAllSummaryBtn');
-                  const btnText = document.getElementById('syncAllSummaryBtnText');
-                  btn.disabled = true;
-                  const oldText = btnText.textContent;
-                  btnText.textContent = '同步中...';
+                async function syncAllSummary(mode = 'fill') {
+                  if (mode === 'regenerate' && !confirm('将重新调用 AI 生成所有已发布文章的摘要，可能产生费用。手动摘要仍会受到保护。是否继续？')) {
+                    return;
+                  }
+                  const buttons = Array.from(document.querySelectorAll('[data-summary-sync]'));
+                  const status = document.getElementById('summarySyncStatus');
+                  const apiBase = '/apis/api.summary.summaraidgpt.lik.cc/v1alpha1';
+                  buttons.forEach(btn => { btn.disabled = true; });
+                  status.textContent = '正在启动摘要同步任务...';
                   try {
-                    const response = await fetch('/apis/api.summary.summaraidgpt.lik.cc/v1alpha1/syncAll', {
+                    const response = await fetch(apiBase + '/syncAll?mode=' + encodeURIComponent(mode), {
                       method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                      },
                     });
                     if (!response.ok) {
-                      throw new Error('同步失败');
+                      throw new Error(response.status === 409 ? '已有任务正在运行，请稍后查看进度' : '启动失败（HTTP ' + response.status + '）');
                     }
-                    const result = await response.text();
-                    alert(result || '同步成功！');
+                    for (let attempt = 0; attempt < 900; attempt++) {
+                      const progressResponse = await fetch(apiBase + '/syncProgress', { cache: 'no-store' });
+                      if (!progressResponse.ok) {
+                        throw new Error('查询任务进度失败（HTTP ' + progressResponse.status + '）');
+                      }
+                      const progress = await progressResponse.json();
+                      status.textContent = '已处理 ' + progress.finished + '/' + progress.total
+                        + '；成功 ' + progress.succeeded + '；失败 ' + progress.failed
+                        + '；跳过 ' + progress.skipped + '；生成 ' + progress.generated
+                        + '；回写 ' + progress.written;
+                      if (!progress.running) {
+                        status.textContent = (progress.taskFailed || progress.failed ? '任务结束，存在失败：' : '任务完成：') + status.textContent;
+                        return;
+                      }
+                      await new Promise(resolve => setTimeout(resolve, 2000));
+                      if (!status.isConnected) {
+                        return;
+                      }
+                    }
+                    status.textContent += '。已停止页面轮询，后台任务不受影响，可点击“查看同步进度”。';
                   } catch (err) {
-                    alert('同步失败：' + err.message);
+                    status.textContent = '摘要同步提示：' + err.message + '。后台已启动的任务不会因此取消。';
                   } finally {
-                    btn.disabled = false;
-                    btnText.textContent = oldText;
+                    buttons.forEach(btn => { btn.disabled = false; });
+                  }
+                }
+                async function viewSummarySyncProgress() {
+                  const status = document.getElementById('summarySyncStatus');
+                  try {
+                    const response = await fetch('/apis/api.summary.summaraidgpt.lik.cc/v1alpha1/syncProgress', { cache: 'no-store' });
+                    if (!response.ok) {
+                      throw new Error('HTTP ' + response.status);
+                    }
+                    const p = await response.json();
+                    status.textContent = (p.running ? '运行中：' : p.taskFailed || p.failed ? '任务结束，存在失败：' : '当前进度：')
+                      + '已处理 ' + p.finished + '/' + p.total + '；成功 ' + p.succeeded
+                      + '；失败 ' + p.failed + '；跳过 ' + p.skipped
+                      + '；生成 ' + p.generated + '；回写 ' + p.written;
+                  } catch (err) {
+                    status.textContent = '查询同步进度失败：' + err.message;
                   }
                 }
             - $el: button
               attrs:
                 type: button
                 id: syncAllSummaryBtn
-                onclick: "syncAllSummary()"
+                data-summary-sync: "true"
+                onclick: "syncAllSummary('fill')"
                 class: "btn-md btn-primary btn flex items-center gap-2"
               children:
                 - $el: span
@@ -74,13 +108,40 @@ spec:
                 - $el: span
                   attrs:
                     id: syncAllSummaryBtnText
-                  children: 同步所有文章AI摘要
+                  children: 补齐缺失摘要并同步
+            - $el: button
+              attrs:
+                type: button
+                data-summary-sync: "true"
+                onclick: "syncAllSummary('repair')"
+                class: "btn-md btn-primary btn flex items-center gap-2"
+              children: 仅回写已有摘要（不调用AI）
+            - $el: button
+              attrs:
+                type: button
+                data-summary-sync: "true"
+                onclick: "syncAllSummary('regenerate')"
+                class: "btn-md btn-primary btn flex items-center gap-2"
+              children: 强制重新生成摘要
+            - $el: button
+              attrs:
+                type: button
+                onclick: "viewSummarySyncProgress()"
+                class: "btn-md btn flex items-center gap-2"
+              children: 查看同步进度
+            - $el: div
+              attrs:
+                id: summarySyncStatus
+                role: status
+                aria-live: polite
+                class: "formkit-help text-xs text-gray-500"
+              children: 尚未启动摘要同步任务
             - $el: div
               attrs:
                 class: "formkit-help text-xs text-gray-500"
                 style:
                   marginTop: "8px"
-              children: "请先在 AI 基座插件中配置并启用语言模型，本插件将直接调用 AI 基座能力。"
+              children: "只处理已发布文章，草稿和手动摘要不会覆盖。已有摘要显示异常时，优先选择仅回写；更换模型或提示词后才需要强制重新生成。生成任务需先配置 AI 基座语言模型。"
         - $el: span
           children: "Halo交流群"
         - $el: div

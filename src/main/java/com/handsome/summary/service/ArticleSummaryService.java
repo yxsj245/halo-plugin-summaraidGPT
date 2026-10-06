@@ -26,6 +26,14 @@ public interface ArticleSummaryService {
 
     Mono<Map<String, Object>> updatePostContentWithSummary(String postMetadataName);
 
+    /** 前台只读查询，不触发生成或回写。 */
+    Mono<Map<String, Object>> readSummaryContent(String postMetadataName);
+
+    enum SyncMode { FILL, REPAIR, REGENERATE }
+
+    /** 启动批量同步，同一时刻只允许一个任务。 */
+    Mono<Map<String, Object>> startSummarySync(SyncMode mode);
+
     Mono<Void> syncAllSummariesAsync();
     /**
      * 查询当前批量同步进度

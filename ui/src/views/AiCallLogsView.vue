@@ -34,7 +34,7 @@ const pageSize = ref(20)
 const total = ref(0)
 const AI_CALL_LOGS_MANAGE_PERMISSION = 'plugin:summaraidGPT:ai-call-logs:manage'
 const AI_CALL_LOG_DELETING_REFETCH_INTERVAL = 1000
-let deletingLogRefetchTimer: ReturnType<typeof window.setInterval> | undefined
+let deletingLogRefetchTimer: number | undefined
 
 const filters = reactive({
   operation: '',

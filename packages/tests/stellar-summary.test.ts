@@ -175,6 +175,23 @@ describe('摘要接口真实返回口径', () => {
     expect(resolveSummarySignal({ success: false, message: '系统异常', summaryContent: '' }).empty).toBe(true);
   });
 
+  it('重复访问的旧版无需更新响应仍显示真实摘要', () => {
+    const result = resolveSummarySignal({
+      success: false,
+      message: '摘要内容未发生变化，无需更新',
+      summaryContent: '已经成功同步的摘要',
+    });
+    expect(result).toEqual({ content: '已经成功同步的摘要', empty: false });
+    expect(resolveStellarSignalState({ loading: false, failed: false, empty: result.empty })).toBe('ready');
+  });
+
+  it('新接口以 available 表达内容可用性，而不是是否发生写入', () => {
+    expect(resolveSummarySignal({ success: false, available: true, summaryContent: '真实摘要' }).empty).toBe(false);
+    expect(resolveSummarySignal({ success: true, available: false, summaryContent: '后端提示' }).empty).toBe(true);
+    expect(resolveSummarySignal({ available: true, blackList: true, summaryContent: '真实摘要' }).empty).toBe(true);
+    expect(resolveSummarySignal({ available: true, summaryContent: '  ' }).empty).toBe(true);
+  });
+
   it('正常摘要按文本裁剪后作为信号', () => {
     expect(resolveSummarySignal({ success: true, summaryContent: '  本舱信号正文  ', blackList: false }))
       .toEqual({ content: '本舱信号正文', empty: false });

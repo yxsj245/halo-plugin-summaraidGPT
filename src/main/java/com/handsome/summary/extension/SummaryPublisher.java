@@ -25,7 +25,7 @@ public class SummaryPublisher {
                 log.info("开始处理文章发布事件: {}", event.getName());
                 articleSummaryService.getSummary(post)
                     .subscribe(
-                        response -> log.info("摘要同步成功！: {}", response),
+                        response -> log.info("文章摘要已生成并完成回写处理，文章: {}", event.getName()),
                         error -> log.error("摘要同步失败", error)
                     );
             });

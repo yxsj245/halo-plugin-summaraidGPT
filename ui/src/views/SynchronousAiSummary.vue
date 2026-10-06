@@ -2,6 +2,7 @@
 import type { ListedPost } from '@halo-dev/api-client'
 import { computed, toRefs } from 'vue'
 import { VEntityField } from '@halo-dev/components'
+import { hasWrittenAiSummary } from '@/utils/summary-status'
 import StreamlineAiEditRobot from '~icons/streamline-plump-color/ai-edit-robot?width=1.2em&height=1.2em'
 
 const props = withDefaults(
@@ -14,12 +15,12 @@ const props = withDefaults(
 const { post } = toRefs(props)
 
 const summaryUpdated = computed(() => {
-  return post.value.post.metadata.annotations?.['summary.lik.cc/ai-summary-updated']
+  return hasWrittenAiSummary(post.value.post)
 })
 </script>
 
 <template>
-  <VEntityField v-if="summaryUpdated" v-tooltip="'智阅AI摘要同步成功'">
+  <VEntityField v-if="summaryUpdated" v-tooltip="'智阅AI摘要已回写到文章'">
     <template #description>
       <StreamlineAiEditRobot class=":uno: cursor-pointer text-sm" />
     </template>

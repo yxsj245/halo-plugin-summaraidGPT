@@ -186,7 +186,7 @@ async function fetchSummaryContentSilent(): Promise<void> {
       try {
         await fetchSummaryContent(postName);
       } catch (error) {
-        console.warn('摘要入库失败:', error);
+        console.warn('读取摘要失败:', error);
       }
     }),
   );

@@ -8,7 +8,7 @@ metadata:
     rbac.authorization.halo.run/aggregate-to-anonymous: "true"
 rules:
   - apiGroups: ["api.summary.summaraidgpt.lik.cc"]
-    resources: ["updateContent","dialogConfig","summaryConfig"]
+    resources: ["updateContent","summaryContent","dialogConfig","summaryConfig"]
     verbs: ["update", "create", "get", "list"]
   - apiGroups: ["api.summary.summaraidgpt.lik.cc"]
     resources: ["articleReadings","articleReadingInteractions"]

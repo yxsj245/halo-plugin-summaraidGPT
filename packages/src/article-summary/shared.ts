@@ -30,8 +30,10 @@ export interface SummaryWidgetConfig {
 
 export interface SummaryContentResponse {
   summaryContent?: string;
-  /** 后端 updateContent 的成败标记：没有对应摘要记录时会返回 success:false（HTTP 仍是 200）。 */
+  /** 查询结果的成败标记；旧版 updateContent 可能只表示是否发生文章写入。 */
   success?: boolean;
+  /** 摘要是否可展示，与文章是否发生写入分开；旧后端可能没有此字段。 */
+  available?: boolean;
   message?: string;
   blackList?: boolean;
 }
@@ -192,9 +194,8 @@ export function shouldTypewrite(input: {
 }
 
 /**
- * 摘要接口的真实返回口径：`POST updateContent` 即使没有摘要记录也会以 HTTP 200 返回
- * `{ success: false, message, summaryContent: '未找到摘要内容', blackList: false }`。
- * 因此“有没有收到导读信号”看 success 与文本，而不是只看 HTTP 状态。
+ * 新版只读接口通过 available 表达可展示性，与回写是否改变文章分离。
+ * 兼容旧版 updateContent 的缺失提示和“无需更新”响应，不能把幂等回写当成空摘要。
  */
 export interface SummarySignal {
   /** 既有口径直接展示的文本：后端文案原样透传，保持旧风格观感不变。 */
@@ -205,8 +206,10 @@ export interface SummarySignal {
 
 export function resolveSummarySignal(data: SummaryContentResponse | null | undefined): SummarySignal {
   const content = data?.summaryContent?.trim() || '';
-  const declined = data?.success === false;
-  return { content, empty: declined || !content };
+  // 新接口明确给出可展示性；兼容旧后端的“无需更新”响应，不能把幂等操作当成摘要缺失。
+  const legacyUnchanged = data?.message === '摘要内容未发生变化，无需更新';
+  const available = data?.available ?? (data?.success !== false || legacyUnchanged);
+  return { content, empty: data?.blackList === true || !available || !content };
 }
 
 /** 文章名为空时洞察图谱的提示。 */
@@ -390,13 +393,7 @@ export async function fetchSummaryConfig(): Promise<SummaryWidgetConfig> {
 }
 
 export async function fetchSummaryContent(postName: string): Promise<SummaryContentResponse> {
-  const response = await fetch(`${SUMMARY_API_BASE}/updateContent`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: postName,
-  });
+  const response = await fetch(`${SUMMARY_API_BASE}/summaryContent/${encodeURIComponent(postName)}`);
 
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}: ${response.statusText}`);

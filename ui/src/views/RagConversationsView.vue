@@ -33,8 +33,8 @@ const conversationPageSize = ref(20)
 const conversationTotal = ref(0)
 const RAG_MANAGE_PERMISSION = 'plugin:summaraidGPT:rag:manage'
 const CONVERSATION_DELETING_REFETCH_INTERVAL = 1000
-let keywordTimer: ReturnType<typeof window.setTimeout> | undefined
-let deletingConversationRefetchTimer: ReturnType<typeof window.setInterval> | undefined
+let keywordTimer: number | undefined
+let deletingConversationRefetchTimer: number | undefined
 
 const canManageRag = computed(() => hasUiPermission(RAG_MANAGE_PERMISSION))
 const activeConversation = computed(() =>
